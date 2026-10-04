@@ -1,0 +1,84 @@
+n_runs: 1
+experiment: "ca4mi_mp" 
+data_dir: "../Datasets/BCICompetition-IV2a/"  # ~ replace with your own data path
+dataset_name: "BCICompIV2a" 
+checkpoint: "./checkpoints/ca4mi_mp_2a" 
+output: ""
+approach: 'ca4mi_mp'
+orth: "yes"
+lam: 1
+adv: 0.01
+orth_reg: 0.5
+pro_loss_reg: 0.001
+seed: 0
+gamma: 2.0
+n_subjects: 9
+n_classes: 2
+nchans: 22
+ntimes: 1000
+use_memory: "yes"
+n_samples: 20
+global_reservoir_size : 1000
+use_proto_ema: 'yes'
+use_prototypes: 'yes'
+max_prototypes: 20
+align: 'yes' # IEA
+mixup: 'yes'
+alpha: 0.5
+private_dim: 128
+shared_dim: 128
+proto_dim: 64
+#### Encoder
+encoder_lr: 0.001
+encoder_wd: 0.03
+shared_step: 2
+#### Discriminator
+discriminator_lr: 0.001
+discriminator_wd: 0.03
+discriminator_step: 1
+lr_factor: 3
+lr_min: 1.0e-07
+lr_patience: 7
+mom: 0.9
+inputsize: [288, 22, 1000] #Set [576, 22, 1000] for 4 class 2a dataset, [724, 3, 750] for 2b dataset, [400, 20, 1000] for openBMI dataset.
+model: 'DCN'  
+latent_dim: 128 #64
+hidden_dim: [64,32]
+dropout: 0.25
+nlayers: 3
+batch_size: 32 
+progressive_batch: True
+min_batch_size: 32
+max_batch_size: 256
+batch_strategy: 'exponential' 
+warmup_subjects: 2
+stable_subjects: 3
+power_of_2_batch: True
+valid_batch_multiplier: 1.5
+n_epochs: 200
+pc_valid: 0.15
+pc_test: 0.15
+units: 175
+n_workers: 1
+device: "cuda:0"
+#### ---------------- CA4MI-MP contributions ----------------
+#### (main/main_mp.py --phase N overrides these with the cumulative phase presets)
+# Phase 1 - multi-prototype
+n_modes: 3                      # anchors per class (1 = single prototype, as in CA4MI)
+modes_per_subject: 1            # modes per class extracted from each subject (k-means)
+# Phase 2 - memory (budget = max_prototypes above)
+memory_selection: 'diversity'   # 'random' (reservoir-like) | 'diversity' (Ward merging)
+class_balanced_memory: 'yes'    # max_prototypes / n_classes entries per class
+# Phase 3 - adaptive prototype consistency
+adaptive_proto: 'no'
+adaptive_tau: 1.0               # width of the similarity kernel (x mode spread)
+adaptive_min_weight: 0.1        # minimum constraint for very different subjects
+# Phase 4 - prototype uncertainty (mu, Sigma)
+proto_distance: 'euclidean'     # 'euclidean' | 'mahalanobis'
+var_floor_ratio: 0.1            # variance floor = ratio * mean variance
+# Option - contrastive prototype loss
+proto_contrastive_reg: 0.0      # 0 = off (absolute weight, independent of pro_loss_reg)
+proto_temperature: 1.0
+# Evaluation
+eval_with_current_shared: 'yes' # 'no' = exact original evaluation code
+wandb_mode: 'online'            # 'online' | 'offline' | 'disabled'
