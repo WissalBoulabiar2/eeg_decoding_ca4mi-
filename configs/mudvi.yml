@@ -1,0 +1,36 @@
+n_runs: 1
+experiment: 'mudvi'
+dataset: 'bci-competition-IV2a'
+dataset_name: 'BCICompIV2a'
+data_dir: "../Datasets/BCICompetition-IV2a/"  # ~ replace with your own data path 
+checkpoint: './checkpoints/mudvi' 
+approach: 'mudvi'
+output: ''
+ntimes: 1000
+nchans: 22
+n_subjects: 9
+n_classes: 2
+use_memory: 'yes'
+n_samples: 100
+global_reservoir_size: 1000
+lr: 0.001
+wd: 0.01
+lr_patience: 7
+lr_factor: 3
+patience: 10
+buffer_size: 20
+epochs: 200
+batch_size: 32
+pc_valid: 0.15
+pc_test: 0.15
+n_workers: 1
+device: 'cuda:0'
+inputsize: [288, 22, 1000]
+model: 'DCN'
+units: 175
+head_units: 28
+latent_dim: 64
+hidden_dim: [64, 32]
+dropout: 0.25
+ks: '(1,5)'
+
