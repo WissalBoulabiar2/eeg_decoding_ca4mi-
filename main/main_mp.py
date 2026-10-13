@@ -68,7 +68,7 @@ def main():
     print("=" * 80)
     for key in ['phase', 'n_modes', 'modes_per_subject', 'max_prototypes', 'memory_selection',
                 'class_balanced_memory', 'adaptive_proto', 'proto_distance', 'proto_contrastive_reg',
-                'eval_with_current_shared', 'n_subjects', 'n_classes', 'device', 'checkpoint']:
+                'eval_with_current_shared', 'diagnostics', 'n_subjects', 'n_classes', 'device', 'checkpoint']:
         print(f"{key:25s}: {args.get(key)}")
     print("=" * 80)
 

@@ -46,6 +46,7 @@ class CA4MI_MP(CA4MI):
             seed=args.seed,
         )
         self.trainer = ca4mi_mp_Trainer(self)
+        self.diagnostics = None  # set by EEGTrainerMP when diagnostics='yes'
 
     # ------------------------------------------------------------ memory
     def extract_shared_features(self, loader, net, sub_id):
@@ -138,6 +139,12 @@ class ca4mi_mp_Trainer(ca4mi_Trainer):
     def _validate_prototypes(self, prototypes):
         if prototypes is not None and not isinstance(prototypes, PrototypeAnchors):
             raise ValueError("Prototypes must be a PrototypeAnchors instance")
+
+    def train_single_epoch(self, sub_id, dataset, prototypes=None):
+        super().train_single_epoch(sub_id, dataset, prototypes)
+        # Diagnostics (main/diagnostics_mp.py), only with diagnostics='yes'
+        if self.ca4mi.diagnostics is not None:
+            self.ca4mi.diagnostics.on_epoch_end(self.ca4mi, sub_id, dataset, prototypes)
 
     def _train_encoder_without_mixup(self, x, y, sub_module_label, sub_id, t_real_D, prototypes):
         """Train encoder without mixup (prototype loss on the shared space, as with mixup)"""

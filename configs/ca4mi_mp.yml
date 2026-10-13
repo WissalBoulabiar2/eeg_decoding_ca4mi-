@@ -82,3 +82,7 @@ proto_temperature: 1.0
 # Evaluation
 eval_with_current_shared: 'yes' # 'no' = exact original evaluation code
 wandb_mode: 'online'            # 'online' | 'offline' | 'disabled'
+#### Diagnostics (main/diagnostics_mp.py) - experiments A-D, written to <checkpoint>/diagnostics/seed_<seed>/
+diagnostics: 'no'               # 'yes' = log curves, confusion, feature shift, gradients, forgetting (slower)
+diag_every: 10                  # gradients and previous-subject validation every N epochs
+diag_grad_samples: 64           # fixed training trials used for the gradient diagnostics

@@ -30,6 +30,24 @@ python main/main_mp.py --config ./configs/ca4mi_mp.yml --phase 2 --set n_modes=2
 Chaque phase écrit dans `<checkpoint>/phaseN/`. `--set clé=valeur` remplace n'importe quel paramètre.
 La mémoire est sauvegardée après chaque sujet (`prototype_memory_<t>.pt`) pour visualiser les modes.
 
+## Diagnostics (expériences A-D)
+
+`--set diagnostics=yes` active `main/diagnostics_mp.py` (désactivé par défaut, la trajectoire d'entraînement
+est identique : états RNG sauvegardés/restaurés, mode eval, aucune mise à jour). Sorties `.jsonl` dans
+`<checkpoint>/diagnostics/seed_<seed>/` :
+
+| Fichier | Expérience |
+|---|---|
+| `A_curves`, `A_summary` | courbes train/valid par époque (essais propres vs rejoués), époque choisie par `loss_tot` vs CE valid |
+| `B_confusion` | matrice de confusion / rappel par classe pour chaque (t, u), essais propres vs rejoués |
+| `C_alignment`, `C_shift` | distance à l'identité après IEA, sondes linéaires sujet/classe, Fisher, distances aux ancres, dérive des prototypes |
+| `D_gradients`, `D_forgetting`, `D_memory` | normes/cosinus des gradients par loss sur le shared, valid des sujets passés pendant l'entraînement, contenu des mémoires |
+
+```sh
+python main/main_mp.py --config ./configs/ca4mi_mp.yml --phase 3 --set diagnostics=yes wandb_mode=disabled
+python main/diagnostics_mp.py <checkpoint>/<uid>/ca4mi_mp_9_subjects_seed_0.txt   # résumé B hors-ligne
+```
+
 ## Fonctionnement
 
 - **Extraction** : après chaque sujet, les features *shared* des échantillons **du sujet courant** (les échantillons rejoués sont ignorés)

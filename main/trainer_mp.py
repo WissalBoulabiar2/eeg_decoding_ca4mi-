@@ -7,6 +7,7 @@ import wandb
 from methods.ca4mi_mp import CA4MI_MP
 from networks import base_ca4mi as network
 from trainer import EEGTrainer
+from diagnostics_mp import DiagnosticsMP
 import utils
 
 
@@ -27,6 +28,9 @@ class EEGTrainerMP(EEGTrainer):
         net = network.Cls_HEAD(self.args).to(self.args.device)
         net.print_model_size()
         ca4mi = CA4MI_MP(net, self.args, network=network)
+        diag = DiagnosticsMP(self.args) if self.args.get('diagnostics', 'no') == 'yes' else None
+        ca4mi.diagnostics = diag
+        self.diagnostics = diag
 
         num_subjects = self.args.n_subjects
         acc = np.zeros((num_subjects, num_subjects), dtype=np.float32)
@@ -59,6 +63,9 @@ class EEGTrainerMP(EEGTrainer):
                 mode=self.args.get('wandb_mode', 'online')
             )
 
+            if diag is not None:
+                diag.begin_subject(t, dataset, dataloader, ca4mi)
+
             if self.args.use_prototypes == 'yes':
                 anchors = ca4mi.get_anchors()
                 ca4mi.adversarial_training(t, dataset[t], prototypes=anchors)
@@ -69,6 +76,10 @@ class EEGTrainerMP(EEGTrainer):
                 self.save_memory(ca4mi, t)
             else:
                 ca4mi.adversarial_training(sub_id=t, dataset=dataset[t], prototypes=None)
+
+            if diag is not None:
+                diag.end_subject(t)
+                diag.log_feature_shift(ca4mi, t)
 
             self.evaluate_all_previous_subjects(ca4mi, dataset, t, acc, lss, f1_mat, inf_time_mat)
 
@@ -108,6 +119,8 @@ class EEGTrainerMP(EEGTrainer):
             lss[t, u] = res['loss_cls']
             f1_mat[t, u] = res['f1_macro']
             inf_time_mat[t, u] = res['avg_inf_time']
+            if self.diagnostics is not None:
+                self.diagnostics.log_test(model, dataset[u]['test'], t, u)
 
     def save_memory(self, ca4mi, t):
         """Save memory content after each subject (to analyse / visualise the modes)."""
