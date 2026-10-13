@@ -4,8 +4,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import numpy as np
 import torch
 import wandb
-from methods.ca4mi_mp import CA4MI_MP
-from networks import base_ca4mi as network
+from torch.utils.data import TensorDataset, DataLoader
+from methods.ca4mi_mp import CA4MI_MP, enabled
+from networks import base_ca4mi_mp as network
 from trainer import EEGTrainer
 from diagnostics_mp import DiagnosticsMP
 import utils
@@ -15,8 +16,38 @@ class EEGTrainerMP(EEGTrainer):
     """EEGTrainer for CA4MI-MP. The original EEGTrainer / CA4MI pipeline is left untouched."""
 
     def initialize_dataloader(self):
+        if enabled(self.args, 'replay_fix', 'yes'):
+            from dataloaders import dataloader_ca4mi_mp as factory
+            return factory.IncrementalDataStreamingMP(self.args)
         from dataloaders import dataloader_ca4mi as factory
         return factory.IncrementalDataStreaming(self.args)
+
+    # ------------------------------------------------------------------ replay (replay_fix='yes')
+    def with_replay(self, train_loader):
+        """Aligned training trials of the current subject + replay buffer (training split only)."""
+        if self.replay is None:
+            return train_loader
+        tensors = [torch.cat([a, b]) for a, b in zip(train_loader.dataset.tensors, self.replay)]
+        return DataLoader(TensorDataset(*tensors), batch_size=self.args.batch_size, shuffle=True)
+
+    def add_to_replay(self, train_loader, t):
+        """Store n_samples aligned training trials of subject t, class-balanced, with their true labels.
+        They keep the IEA alignment of their own subject."""
+        x, y, sub, dis = train_loader.dataset.tensors
+        g = torch.Generator().manual_seed(int(self.args.seed) * 1000 + t)
+        per_class = self.args.n_samples // self.args.n_classes
+        keep = []
+        for c in range(self.args.n_classes):
+            idx = (y == c).nonzero(as_tuple=True)[0].cpu()
+            keep.append(idx[torch.randperm(len(idx), generator=g)[:per_class]])
+        keep = torch.cat(keep).to(x.device)
+        new = [v[keep] for v in (x, y, sub, dis)]
+        self.replay = new if self.replay is None else [torch.cat([a, b]) for a, b in zip(self.replay, new)]
+        if len(self.replay[0]) > self.args.global_reservoir_size:
+            sel = torch.randperm(len(self.replay[0]), generator=g)[:self.args.global_reservoir_size].to(x.device)
+            self.replay = [v[sel] for v in self.replay]
+        labels = {c: int((self.replay[1] == c).sum()) for c in range(self.args.n_classes)}
+        print(f"  Replay buffer: {len(self.replay[0])} trials | per class {labels}")
 
     def run_single_experiment(self, run_index):
         self.args.seed = run_index
@@ -32,6 +63,8 @@ class EEGTrainerMP(EEGTrainer):
         diag = DiagnosticsMP(self.args) if self.args.get('diagnostics', 'no') in ('yes', True) else None
         ca4mi.diagnostics = diag
         self.diagnostics = diag
+        replay_fix = enabled(self.args, 'replay_fix', 'yes')
+        self.replay = None
 
         num_subjects = self.args.n_subjects
         acc = np.zeros((num_subjects, num_subjects), dtype=np.float32)
@@ -46,7 +79,8 @@ class EEGTrainerMP(EEGTrainer):
             print(f"{' '} Dataset {t + 1:2d} ({dataset[t]['name']})")
             print("-" * 50)
 
-            # IEA alignment, identical to CA4MI
+            # IEA alignment, identical to CA4MI. With replay_fix the training split holds only the current
+            # subject's trials, so the reference is estimated from them alone.
             dataset[t]['train'], updated_refEA = self.align_data(
                 dataset[t]['train'], ca4mi, updated_refEA, self.args.device,
                 update_ref=True, gamma=0.1, batch_size=self.args.batch_size)
@@ -56,6 +90,11 @@ class EEGTrainerMP(EEGTrainer):
             dataset[t]['test'], _ = self.align_data(
                 dataset[t]['test'], ca4mi, updated_refEA, self.args.device,
                 update_ref=False, batch_size=self.args.batch_size)
+            if replay_fix:
+                own_train = dataset[t]['train']
+                dataset[t]['train'] = self.with_replay(own_train)
+            if enabled(self.args, 'replay_private', 'yes'):
+                ca4mi.model.freeze_past_subjects(t)
 
             wandb.init(
                 project="CA4MI-MP-EEG",
@@ -65,7 +104,7 @@ class EEGTrainerMP(EEGTrainer):
             )
 
             if diag is not None:
-                diag.begin_subject(t, dataset, dataloader, ca4mi)
+                diag.begin_subject(t, dataset, dataloader, ca4mi, replay=self.replay)
 
             if self.args.use_prototypes == 'yes':
                 anchors = ca4mi.get_anchors()
@@ -77,6 +116,8 @@ class EEGTrainerMP(EEGTrainer):
                 self.save_memory(ca4mi, t)
             else:
                 ca4mi.adversarial_training(sub_id=t, dataset=dataset[t], prototypes=None)
+            if replay_fix:
+                self.add_to_replay(own_train, t)
 
             if diag is not None:
                 diag.end_subject(t)

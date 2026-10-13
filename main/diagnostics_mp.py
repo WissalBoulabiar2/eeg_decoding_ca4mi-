@@ -178,14 +178,16 @@ class DiagnosticsMP:
         self.epoch = 0
         self.curves = []
         self.grad_idx = None
+        self.replay = None
 
     def write(self, name, record):
         with open(os.path.join(self.out_dir, f'{name}.jsonl'), 'a') as f:
             f.write(json.dumps(record, default=_jsonable) + '\n')
 
     # ------------------------------------------------------------------ subject lifecycle
-    def begin_subject(self, t, dataset, dataloader, ca4mi):
-        """Call after IEA alignment of subject t, before training."""
+    def begin_subject(self, t, dataset, dataloader, ca4mi, replay=None):
+        """Call after IEA alignment of subject t, before training. replay = EEGTrainerMP replay buffer (replay_fix)."""
+        self.replay = replay
         self.t, self.dataset, self.epoch, self.curves = t, dataset, 0, []
         n = len(loader_tensors(dataset[t]['train'])[0])
         g = torch.Generator().manual_seed(int(self.args.seed) * 1000 + t)
@@ -294,6 +296,8 @@ class DiagnosticsMP:
     # ------------------------------------------------------------------ D: memory content
     def log_memory(self, t, dataloader, ca4mi):
         mem = getattr(dataloader, 'global_memory', None) or {}
+        if self.replay is not None:
+            mem = {'y': self.replay[1].tolist(), 'sub_module_label': self.replay[2].tolist()}
         rec = {'t': t, 'replay_size': len(mem.get('y', [])),
                'replay_label_count': dict(Counter(int(v) for v in mem.get('y', []))),
                'replay_subject_count': dict(Counter(int(v) for v in mem.get('sub_module_label', [])))}

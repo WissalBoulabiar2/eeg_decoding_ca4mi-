@@ -19,6 +19,11 @@ from methods.prototype_memory import PrototypeMemory, PrototypeAnchors
 from methods.continualTrainer.ca4miTrainer import ca4mi_Trainer
 
 
+def enabled(args, key, default='no'):
+    """yes/no switch; `--set key=yes` is parsed by OmegaConf as the boolean True."""
+    return args.get(key, default) in ('yes', True)
+
+
 class CA4MI_MP(CA4MI):
     def __init__(self, model, args, network):
         super().__init__(model, args, network)
@@ -139,6 +144,15 @@ class ca4mi_mp_Trainer(ca4mi_Trainer):
     def _validate_prototypes(self, prototypes):
         if prototypes is not None and not isinstance(prototypes, PrototypeAnchors):
             raise ValueError("Prototypes must be a PrototypeAnchors instance")
+
+    def eval_(self, data_loader, sub_id, prototypes=None):
+        res = super().eval_(data_loader, sub_id, prototypes)
+        # model_selection='cls': the trainer keeps the epoch with the lowest valid loss_tot; loss_tot includes
+        # +adv_loss (discriminator CE), so lower means *more* subject-separable shared features. Select on the
+        # classification loss instead. loss_tot is only used for selection and logging.
+        if self.ca4mi.args.get('model_selection', 'cls') == 'cls':
+            res['loss_tot'] = res['loss_cls']
+        return res
 
     def train_single_epoch(self, sub_id, dataset, prototypes=None):
         super().train_single_epoch(sub_id, dataset, prototypes)

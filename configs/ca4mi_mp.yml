@@ -79,6 +79,10 @@ var_floor_ratio: 0.1            # variance floor = ratio * mean variance
 # Option - contrastive prototype loss
 proto_contrastive_reg: 0.0      # 0 = off (absolute weight, independent of pro_loss_reg)
 proto_temperature: 1.0
+# Fixes (apply to every phase; set to 'no' / 'total' to reproduce the runs before the fixes)
+replay_fix: 'yes'               # replay with true labels, training split only, own-subject IEA alignment
+replay_private: 'yes'           # replayed trials through their own frozen private encoder + head
+model_selection: 'cls'          # 'cls' = best epoch by valid cross-entropy | 'total' = original valid loss_tot
 # Evaluation
 eval_with_current_shared: 'yes' # 'no' = exact original evaluation code
 wandb_mode: 'online'            # 'online' | 'offline' | 'disabled'
