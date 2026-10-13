@@ -28,7 +28,8 @@ class EEGTrainerMP(EEGTrainer):
         net = network.Cls_HEAD(self.args).to(self.args.device)
         net.print_model_size()
         ca4mi = CA4MI_MP(net, self.args, network=network)
-        diag = DiagnosticsMP(self.args) if self.args.get('diagnostics', 'no') == 'yes' else None
+        # --set diagnostics=yes is parsed by OmegaConf as the boolean True
+        diag = DiagnosticsMP(self.args) if self.args.get('diagnostics', 'no') in ('yes', True) else None
         ca4mi.diagnostics = diag
         self.diagnostics = diag
 
