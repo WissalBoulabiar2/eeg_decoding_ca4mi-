@@ -149,6 +149,15 @@ class ca4mi_mp_Trainer(ca4mi_Trainer):
         if prototypes is not None and not isinstance(prototypes, PrototypeAnchors):
             raise ValueError("Prototypes must be a PrototypeAnchors instance")
 
+    def adversarial_training(self, sub_id, dataset, prototypes=None):
+        self._epochs_done, self._valid_loader, self._valid_hist, self._in_diag = 0, dataset['valid'], [], False
+        super().adversarial_training(sub_id, dataset, prototypes)
+        if self._valid_hist:
+            best = int(np.argmin(self._valid_hist))
+            print(f"  [Selection] {len(self._valid_hist)} epochs run, selected epoch {best + 1} "
+                  f"(valid loss {self._valid_hist[best]:.3f}, min_select_epoch="
+                  f"{self.ca4mi.args.get('min_select_epoch', 0)})")
+
     def eval_(self, data_loader, sub_id, prototypes=None):
         res = super().eval_(data_loader, sub_id, prototypes)
         # model_selection='cls': the trainer keeps the epoch with the lowest valid loss_tot; loss_tot includes
@@ -156,15 +165,29 @@ class ca4mi_mp_Trainer(ca4mi_Trainer):
         # classification loss instead. loss_tot is only used for selection and logging.
         if self.ca4mi.args.get('model_selection', 'cls') == 'cls':
             res['loss_tot'] = res['loss_cls']
+        if data_loader is getattr(self, '_valid_loader', None):
+            # min_select_epoch=N: no checkpoint before N training epochs. With 22 validation trials the valid loss
+            # is noisy and its minimum can fall on epoch 1-2, keeping an almost untrained model for the subject.
+            # The forced value decreases every epoch, so the trainer's patience / LR schedule is unaffected.
+            forced = self._epochs_done < int(self.ca4mi.args.get('min_select_epoch', 0))
+            if not self._in_diag:
+                self._valid_hist.append(float('inf') if forced else res['loss_tot'])
+            if forced:
+                res['loss_tot'] = 1e9 - self._epochs_done
         return res
 
     def train_single_epoch(self, sub_id, dataset, prototypes=None):
         super().train_single_epoch(sub_id, dataset, prototypes)
         if self.ca4mi.replay_distill and self.ca4mi.replay_bank is not None:
             self._replay_distill_epoch(sub_id)
+        self._epochs_done += 1
         # Diagnostics (main/diagnostics_mp.py), only with diagnostics='yes'
         if self.ca4mi.diagnostics is not None:
-            self.ca4mi.diagnostics.on_epoch_end(self.ca4mi, sub_id, dataset, prototypes)
+            self._in_diag = True
+            try:
+                self.ca4mi.diagnostics.on_epoch_end(self.ca4mi, sub_id, dataset, prototypes)
+            finally:
+                self._in_diag = False
 
     def _replay_distill_epoch(self, sub_id):
         """One pass over the replay buffer: keep the logits of replayed trials close to the logits stored when they

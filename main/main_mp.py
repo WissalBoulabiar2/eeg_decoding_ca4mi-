@@ -68,7 +68,8 @@ def main():
     print("=" * 80)
     for key in ['phase', 'n_modes', 'modes_per_subject', 'max_prototypes', 'memory_selection',
                 'class_balanced_memory', 'adaptive_proto', 'proto_distance', 'proto_contrastive_reg',
-                'replay_fix', 'replay_private', 'model_selection', 'replay_distill', 'replay_distill_reg',
+                'replay_fix', 'replay_private', 'model_selection', 'min_select_epoch',
+                'replay_distill', 'replay_distill_reg',
                 'eval_with_current_shared', 'diagnostics', 'n_subjects', 'n_classes', 'device', 'checkpoint']:
         print(f"{key:25s}: {args.get(key)}")
     print("=" * 80)
