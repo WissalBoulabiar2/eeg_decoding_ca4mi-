@@ -52,6 +52,10 @@ class CA4MI_MP(CA4MI):
         )
         self.trainer = ca4mi_mp_Trainer(self)
         self.diagnostics = None  # set by EEGTrainerMP when diagnostics='yes'
+        # Replay logit consistency (Dark Experience Replay, Buzzega et al. 2020)
+        self.replay_distill = enabled(args, 'replay_distill', 'no')
+        self.replay_distill_reg = float(args.get('replay_distill_reg', 0.5))
+        self.replay_bank = None  # (x, sub_module_label, logits) set by EEGTrainerMP before each subject
 
     # ------------------------------------------------------------ memory
     def extract_shared_features(self, loader, net, sub_id):
@@ -156,9 +160,29 @@ class ca4mi_mp_Trainer(ca4mi_Trainer):
 
     def train_single_epoch(self, sub_id, dataset, prototypes=None):
         super().train_single_epoch(sub_id, dataset, prototypes)
+        if self.ca4mi.replay_distill and self.ca4mi.replay_bank is not None:
+            self._replay_distill_epoch(sub_id)
         # Diagnostics (main/diagnostics_mp.py), only with diagnostics='yes'
         if self.ca4mi.diagnostics is not None:
             self.ca4mi.diagnostics.on_epoch_end(self.ca4mi, sub_id, dataset, prototypes)
+
+    def _replay_distill_epoch(self, sub_id):
+        """One pass over the replay buffer: keep the logits of replayed trials close to the logits stored when they
+        entered the buffer (MSE). With replay_private, private_u and head_u are frozen, so this anchors the shared
+        features of past subjects where their own (frozen) head expects them."""
+        x, sub, logits = self.ca4mi.replay_bank
+        model = self.ca4mi.model
+        model.train()
+        bs = self.ca4mi.args.batch_size
+        order = torch.randperm(len(x), device=x.device)
+        for i in range(0, len(x), bs):
+            idx = order[i:i + bs]
+            xb = x[idx][:, None].float()
+            self.ca4mi.encoder_optimizer.zero_grad()
+            out = model(xb, xb, sub[idx], sub_id)
+            loss = self.ca4mi.replay_distill_reg * torch.nn.functional.mse_loss(out, logits[idx])
+            loss.backward()
+            self.ca4mi.encoder_optimizer.step()
 
     def _train_encoder_without_mixup(self, x, y, sub_module_label, sub_id, t_real_D, prototypes):
         """Train encoder without mixup (prototype loss on the shared space, as with mixup)"""

@@ -30,9 +30,10 @@ class EEGTrainerMP(EEGTrainer):
         tensors = [torch.cat([a, b]) for a, b in zip(train_loader.dataset.tensors, self.replay)]
         return DataLoader(TensorDataset(*tensors), batch_size=self.args.batch_size, shuffle=True)
 
-    def add_to_replay(self, train_loader, t):
+    def add_to_replay(self, train_loader, t, ca4mi):
         """Store n_samples aligned training trials of subject t, class-balanced, with their true labels.
-        They keep the IEA alignment of their own subject."""
+        They keep the IEA alignment of their own subject. Their logits under the model selected for subject t
+        are stored too (used by replay_distill)."""
         x, y, sub, dis = train_loader.dataset.tensors
         g = torch.Generator().manual_seed(int(self.args.seed) * 1000 + t)
         per_class = self.args.n_samples // self.args.n_classes
@@ -42,10 +43,16 @@ class EEGTrainerMP(EEGTrainer):
             keep.append(idx[torch.randperm(len(idx), generator=g)[:per_class]])
         keep = torch.cat(keep).to(x.device)
         new = [v[keep] for v in (x, y, sub, dis)]
+        ca4mi.model.eval()
+        with torch.no_grad():
+            xk = new[0][:, None].float()
+            logits = ca4mi.model(xk, xk, new[2], t)
         self.replay = new if self.replay is None else [torch.cat([a, b]) for a, b in zip(self.replay, new)]
+        self.replay_logits = logits if self.replay_logits is None else torch.cat([self.replay_logits, logits])
         if len(self.replay[0]) > self.args.global_reservoir_size:
             sel = torch.randperm(len(self.replay[0]), generator=g)[:self.args.global_reservoir_size].to(x.device)
             self.replay = [v[sel] for v in self.replay]
+            self.replay_logits = self.replay_logits[sel]
         labels = {c: int((self.replay[1] == c).sum()) for c in range(self.args.n_classes)}
         print(f"  Replay buffer: {len(self.replay[0])} trials | per class {labels}")
 
@@ -65,6 +72,7 @@ class EEGTrainerMP(EEGTrainer):
         self.diagnostics = diag
         replay_fix = enabled(self.args, 'replay_fix', 'yes')
         self.replay = None
+        self.replay_logits = None
 
         num_subjects = self.args.n_subjects
         acc = np.zeros((num_subjects, num_subjects), dtype=np.float32)
@@ -93,6 +101,8 @@ class EEGTrainerMP(EEGTrainer):
             if replay_fix:
                 own_train = dataset[t]['train']
                 dataset[t]['train'] = self.with_replay(own_train)
+                ca4mi.replay_bank = (None if self.replay is None
+                                     else (self.replay[0], self.replay[2], self.replay_logits))
             if enabled(self.args, 'replay_private', 'yes'):
                 ca4mi.model.freeze_past_subjects(t)
 
@@ -117,7 +127,7 @@ class EEGTrainerMP(EEGTrainer):
             else:
                 ca4mi.adversarial_training(sub_id=t, dataset=dataset[t], prototypes=None)
             if replay_fix:
-                self.add_to_replay(own_train, t)
+                self.add_to_replay(own_train, t, ca4mi)
 
             if diag is not None:
                 diag.end_subject(t)

@@ -83,6 +83,9 @@ proto_temperature: 1.0
 replay_fix: 'yes'               # replay with true labels, training split only, own-subject IEA alignment
 replay_private: 'yes'           # replayed trials through their own frozen private encoder + head
 model_selection: 'cls'          # 'cls' = best epoch by valid cross-entropy | 'total' = original valid loss_tot
+# Option - replay logit consistency (Dark Experience Replay, Buzzega et al. 2020; needs replay_fix)
+replay_distill: 'no'            # 'yes' = extra pass per epoch: MSE between replay logits and logits stored at storage time
+replay_distill_reg: 0.5         # weight of that MSE
 # Evaluation
 eval_with_current_shared: 'yes' # 'no' = exact original evaluation code
 wandb_mode: 'online'            # 'online' | 'offline' | 'disabled'
