@@ -38,11 +38,22 @@ GRID_PROTOMEM = {
     'modes1': ['modes_per_subject=1'],         # ablation: single mode per class and subject
     'mem40': ['n_samples=40'],                 # 40 exemplars per subject
 }
-GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM}
+# ProtoMem round 2, around the configuration selected in round 1 (mem40); its first entry is the reference
+_R2 = ['n_samples=40']
+GRID_PROTOMEM2 = {
+    'ref40': _R2,
+    'mem100': ['n_samples=100'],               # same exemplar budget as DER / MUDVI / CGER
+    'tau0.2': _R2 + ['tau=0.2'],
+    'lr3e-4': _R2 + ['lr=0.0003'],
+    'pat20': _R2 + ['patience=20', 'n_epochs=200'],
+    'distill1': _R2 + ['distill_reg=1.0'],
+    'proxies5': _R2 + ['n_proxies=5'],
+}
+GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2}
 
 
 def run_command(method, out, name, data_dir, seed, extra):
-    if method == 'protomem':
+    if method.startswith('protomem'):
         return ['python', 'main/main_protomem.py', '--config', './configs/protomem.yml', '--n_runs', '1',
                 '--checkpoint', os.path.join(out, name), '--set', f'data_dir={data_dir}', f'seed_offset={seed}', *extra]
     return ['python', 'main/main_mp.py', '--config', './configs/ca4mi_mp.yml', '--phase', '5',
@@ -71,6 +82,7 @@ def stats(mats):
 
 
 def summary(out):
+    REFERENCE = next(iter(GRID))  # the first configuration of the grid is its reference
     rows = {}
     print(f"\nVALIDATION (selection only)\n{'config':10s} {'val ACC':>14s} {'val BWT':>14s}  seeds")
     for name in GRID:
