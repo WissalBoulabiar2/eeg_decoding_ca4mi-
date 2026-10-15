@@ -82,23 +82,32 @@ def main():
     parser.add_argument('--n_runs', type=int, default=3)
     parser.add_argument('--configs', nargs='*', default=list(GRID), choices=list(GRID))
     parser.add_argument('--time_limit_h', type=float, default=10.5, help='stop launching runs after this many hours')
+    parser.add_argument('--after_run', type=str, default=None,
+                        help='shell command run after every finished seed (e.g. push results out of Kaggle)')
     parser.add_argument('--summary', action='store_true')
     flags = parser.parse_args()
 
     t0 = time.time()
     if not flags.summary:
+        # One process per (config, seed): a seed already saved is never re-run, so an interrupted
+        # session loses at most the seed that was running.
         for name in flags.configs:
-            if len(matrices(flags.out, name, 'val_accuracy_matrix')) >= flags.n_runs:
-                print(f"skip {name}: already done")
-                continue
-            if time.time() - t0 > flags.time_limit_h * 3600:
-                print(f"time limit reached: {name} and the following configs are left for the next run")
-                break
-            cmd = ['python', 'main/main_mp.py', '--config', './configs/ca4mi_mp.yml', '--phase', '5',
-                   '--n_runs', str(flags.n_runs), '--checkpoint', os.path.join(flags.out, name),
-                   '--set', f'data_dir={flags.data_dir}', 'wandb_mode=disabled', *GRID[name]]
-            print("$ " + " ".join(cmd), flush=True)
-            subprocess.run(cmd, check=True)
+            for seed in range(flags.n_runs):
+                if str(seed) in matrices(flags.out, name, 'val_accuracy_matrix'):
+                    print(f"skip {name} seed {seed}: already done")
+                    continue
+                if time.time() - t0 > flags.time_limit_h * 3600:
+                    print("time limit reached: remaining runs are left for the next session")
+                    summary(flags.out)
+                    return
+                cmd = ['python', 'main/main_mp.py', '--config', './configs/ca4mi_mp.yml', '--phase', '5',
+                       '--n_runs', '1', '--checkpoint', os.path.join(flags.out, name),
+                       '--set', f'data_dir={flags.data_dir}', 'wandb_mode=disabled', f'seed_offset={seed}',
+                       *GRID[name]]
+                print("$ " + " ".join(cmd), flush=True)
+                subprocess.run(cmd, check=True)
+                if flags.after_run:
+                    subprocess.run(flags.after_run, shell=True, check=False)
     summary(flags.out)
 
 

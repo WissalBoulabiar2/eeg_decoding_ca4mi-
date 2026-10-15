@@ -57,7 +57,8 @@ class EEGTrainerMP(EEGTrainer):
         print(f"  Replay buffer: {len(self.replay[0])} trials | per class {labels}")
 
     def run_single_experiment(self, run_index):
-        self.args.seed = run_index
+        # seed_offset lets one process run a single seed (resumable runs: one seed per process)
+        self.args.seed = run_index + int(self.args.get('seed_offset', 0))
         self.set_seed(self.args.seed)
         return self.run_ca4mi_mp(run_index)
 
