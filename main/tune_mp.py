@@ -132,20 +132,30 @@ def main():
     if not flags.summary:
         # One process per (config, seed): a seed already saved is never re-run, so an interrupted
         # session loses at most the seed that was running.
-        for name in flags.configs:
-            for seed in range(flags.n_runs):
-                if str(seed) in matrices(flags.out, name, 'val_accuracy_matrix'):
-                    print(f"skip {name} seed {seed}: already done")
-                    continue
-                if time.time() - t0 > flags.time_limit_h * 3600:
-                    print("time limit reached: remaining runs are left for the next session")
-                    summary(flags.out)
-                    return
-                cmd = run_command(flags.method, flags.out, name, flags.data_dir, seed, GRID[name])
-                print("$ " + " ".join(cmd), flush=True)
-                subprocess.run(cmd, check=True)
-                if flags.after_run:
-                    subprocess.run(flags.after_run, shell=True, check=False)
+        jobs = [(name, seed) for name in flags.configs for seed in range(flags.n_runs)]
+        todo = [(n, s) for n, s in jobs if str(s) not in matrices(flags.out, n, 'val_accuracy_matrix')]
+        print(f"\n{len(jobs)} runs in total: {len(jobs) - len(todo)} already done, {len(todo)} to run\n", flush=True)
+        durations = []
+        for i, (name, seed) in enumerate(todo):
+            elapsed = time.time() - t0
+            if elapsed > flags.time_limit_h * 3600:
+                print(f"time limit reached: {len(todo) - i} runs left for the next session")
+                break
+            left = len(todo) - i
+            eta = f"{np.mean(durations) * left / 3600:.1f} h" if durations else "known after the first run"
+            line = (f"[run {len(jobs) - len(todo) + i + 1}/{len(jobs)}] {name} seed {seed} | runs left: {left} | "
+                    f"elapsed: {elapsed / 3600:.1f} h | estimated time left: {eta}")
+            print("\n" + "#" * len(line) + f"\n{line}\n" + "#" * len(line), flush=True)
+            os.makedirs(flags.out, exist_ok=True)
+            with open(os.path.join(flags.out, 'progress.txt'), 'w') as f:
+                f.write(line + "\n")
+            start = time.time()
+            r = subprocess.run(run_command(flags.method, flags.out, name, flags.data_dir, seed, GRID[name]))
+            durations.append(time.time() - start)
+            if r.returncode != 0:
+                print(f"!!! run failed: {name} seed {seed} (retried in the next session)", flush=True)
+            if flags.after_run:
+                subprocess.run(flags.after_run, shell=True, check=False)
     summary(flags.out)
 
 
