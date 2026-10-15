@@ -1,0 +1,45 @@
+#### ProtoMem (main/main_protomem.py) - not CA4MI: single encoder, subject BN, proxy classifier, memory generator
+experiment: 'protomem'
+dataset_name: 'BCICompIV2a'
+data_dir: "../Datasets/BCICompetition-IV2a/"
+checkpoint: './checkpoints/protomem'
+device: 'cuda:0'
+n_runs: 3
+seed: 0
+seed_offset: 0
+#### Data (same protocol as CA4MI-MP / clean benchmark)
+n_subjects: 9
+n_classes: 2
+nchans: 22
+ntimes: 1000
+pc_valid: 0.15
+pc_test: 0.15
+batch_size: 32
+n_workers: 1
+use_memory: 'no'              # the dataloader's own replay is not used; ProtoMem keeps its exemplar buffer
+global_reservoir_size: 1000
+progressive_batch: False
+ea: 'yes'                     # per-subject Euclidean alignment, reference from training trials only
+#### Network
+latent_dim: 128
+dropout: 0.25
+n_proxies: 3                  # proxies per class in the cosine classifier
+tau: 0.1                      # temperature of the proxy logits
+#### Optimisation
+lr: 0.001
+weight_decay: 0.0001
+n_epochs: 150
+patience: 10
+lr_factor: 3
+lr_min: 1.0e-5
+min_select_epoch: 10          # no checkpoint selected before this epoch (22-trial validation is noisy)
+#### Gaussian prototype memory
+modes_per_subject: 2          # modes per class per subject
+max_prototypes: 24            # 12 per class: Ward consolidation starts after 6 subjects (2 x 2 x 6 = 24)
+memory_selection: 'diversity'
+class_balanced_memory: 'yes'
+#### Forgetting control
+n_samples: 20                 # exemplars per subject (class-balanced), same budget as CA4MI-MP
+distill_reg: 0.5              # logit consistency on exemplars (DER)
+gen_reg: 0.5                  # pseudo-feature replay from the memory modes
+drift_comp: 'yes'             # shift the modes by the drift measured on exemplars (SDC)
