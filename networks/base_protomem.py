@@ -48,14 +48,15 @@ class ProtoMemNet(nn.Module):
         self.proxies = nn.Parameter(0.1 * torch.randn(args.n_classes, args.n_proxies, args.latent_dim))
         self.tau = float(args.tau)
 
-    def start_subject(self, t):
-        """Warm-start the BN of subject t from subject t-1 and freeze the BN of every past subject."""
+    def start_subject(self, t, freeze_past=True):
+        """Warm-start the BN of subject t from subject t-1. Past subjects always keep their running statistics;
+        with freeze_past their affine parameters are frozen too, otherwise replay can still adapt them."""
         for m in self.sbns:
             if t > 0:
                 m.bns[t].load_state_dict(m.bns[t - 1].state_dict())
             for u in range(t):
                 for p in m.bns[u].parameters():
-                    p.requires_grad_(False)
+                    p.requires_grad_(not freeze_past)
             m.current = t
 
     def embed(self, x, sub):

@@ -43,3 +43,6 @@ n_samples: 20                 # exemplars per subject (class-balanced), same bud
 distill_reg: 0.5              # logit consistency on exemplars (DER)
 gen_reg: 0.5                  # pseudo-feature replay from the memory modes
 drift_comp: 'yes'             # shift the modes by the drift measured on exemplars (SDC)
+freeze_past_bn: 'yes'         # 'no': past subjects' BN affine parameters stay trainable through replay
+consolidate_epochs: 0         # > 0: balanced fine-tuning on all subjects' exemplars after each subject
+consolidate_lr_factor: 0.1    # its learning rate = lr * factor

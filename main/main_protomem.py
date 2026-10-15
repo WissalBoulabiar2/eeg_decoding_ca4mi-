@@ -66,6 +66,7 @@ def run(args, seed):
 
         print(f"--- subject {t + 1}/{n} ({d['name']})")
         method.train_subject(t, x_tr, y_tr, x_va, y_va)
+        method.consolidate(t, x_tr, y_tr)
         method.end_subject(t, x_tr, y_tr)
         for u in range(t + 1):
             acc[t, u], f1[t, u] = method.evaluate(data[u][4], data[u][5], u)

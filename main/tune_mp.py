@@ -49,7 +49,18 @@ GRID_PROTOMEM2 = {
     'distill1': _R2 + ['distill_reg=1.0'],
     'proxies5': _R2 + ['n_proxies=5'],
 }
-GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2}
+# ProtoMem round 3, around the configuration selected in round 2 (distill1 = n_samples 40, distill_reg 1.0)
+_R3 = ['n_samples=40', 'distill_reg=1.0']
+GRID_PROTOMEM3 = {
+    'ref_d1': _R3,
+    'mem100': _R3 + ['n_samples=100'],                  # best validation ACC in round 2
+    'lr3e-4': _R3 + ['lr=0.0003'],                      # best validation BWT in round 2
+    'mem100_lr3e-4': _R3 + ['n_samples=100', 'lr=0.0003'],
+    'consol5': _R3 + ['consolidate_epochs=5'],          # balanced consolidation after each subject
+    'consol10': _R3 + ['consolidate_epochs=10'],
+    'bntrain': _R3 + ['freeze_past_bn=no'],             # past subjects' BN affine trainable through replay
+}
+GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2, 'protomem3': GRID_PROTOMEM3}
 
 
 def run_command(method, out, name, data_dir, seed, extra):

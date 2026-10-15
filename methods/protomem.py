@@ -64,7 +64,7 @@ class ProtoMem:
     # ------------------------------------------------------------------ training
     def train_subject(self, t, x_tr, y_tr, x_va, y_va):
         a = self.args
-        self.net.start_subject(t)
+        self.net.start_subject(t, freeze_past=enabled(a, 'freeze_past_bn', 'yes'))
         sub_tr = torch.full_like(y_tr, t)
         if self.replay is not None:
             r = self.replay
@@ -113,6 +113,41 @@ class ProtoMem:
         self.net.load_state_dict(best_state)
         print(f"  [Selection] {epoch} epochs run, selected epoch {best_epoch} (valid CE {best_loss:.3f})")
 
+    # ------------------------------------------------------------------ balanced consolidation
+    def consolidate(self, t, x_tr, y_tr):
+        """consolidate_epochs > 0: after the selected checkpoint of subject t, a few epochs of class- and
+        subject-balanced fine-tuning on the exemplars of the past subjects plus an equal-size class-balanced
+        sample of subject t, at lr * consolidate_lr_factor (balanced fine-tuning, Castro et al. ECCV 2018).
+        Lets past subjects improve (positive backward transfer) instead of only being preserved."""
+        a = self.args
+        n_epochs = int(a.get('consolidate_epochs', 0))
+        if n_epochs <= 0 or self.replay is None:
+            return
+        per_class = int(a.n_samples) // a.n_classes
+        g = torch.Generator().manual_seed(int(a.seed) * 1000 + 500 + t)
+        keep = []
+        for c in range(a.n_classes):
+            idx = (y_tr == c).nonzero(as_tuple=True)[0].cpu()
+            keep.append(idx[torch.randperm(len(idx), generator=g)[:per_class]])
+        keep = torch.cat(keep).to(self.device)
+        r = self.replay
+        x = torch.cat([x_tr[keep], r['x']]); y = torch.cat([y_tr[keep], r['y']])
+        sub = torch.cat([torch.full_like(y_tr[keep], t), r['sub']])
+        opt = self._optimizer(float(a.lr) * float(a.get('consolidate_lr_factor', 0.1)))
+        for _ in range(n_epochs):
+            self.net.train()
+            perm = torch.randperm(len(x), device=self.device)
+            for i in range(0, len(x), int(a.batch_size)):
+                idx = perm[i:i + int(a.batch_size)]
+                loss = F.cross_entropy(self.net(x[idx], sub[idx]), y[idx])
+                if self.gen_reg > 0 and len(self.memory) > 0:
+                    zp, yp = self._sample_memory(len(idx))
+                    loss = loss + self.gen_reg * F.cross_entropy(self.net.logits(zp), yp)
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+        print(f"  [Consolidation] {n_epochs} balanced epochs on {len(y)} trials ({len(r['y'])} exemplars)")
+
     # ------------------------------------------------------------------ after a subject
     @torch.no_grad()
     def end_subject(self, t, x_tr, y_tr):
@@ -129,6 +164,9 @@ class ProtoMem:
                     if sel.any() and ent.any():
                         m.mu[ent] = m.mu[ent] + (feat_new[sel] - r['feat'][sel]).mean(0)
             r['feat'] = feat_new
+            if int(a.get('consolidate_epochs', 0)) > 0:
+                # after consolidation the distillation target is the improved state, not the original one
+                r['logits'] = self.net.logits(feat_new)
         # 2. Gaussian modes of subject t
         sub_t = torch.full_like(y_tr, t)
         feats = self._embed_eval(x_tr, sub_t)
