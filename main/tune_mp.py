@@ -83,7 +83,7 @@ def summary(out):
         print(f"{name:10s} {m[0]:6.2f} ± {s[0]:4.2f} {m[1]:6.2f} ± {s[1]:4.2f}  {n}")
     if REFERENCE not in rows:
         print("\nReference not available yet: no selection.")
-        return
+        return None
     ref_bwt = rows[REFERENCE][1]
     ok = {k: v for k, v in rows.items() if v[1] >= ref_bwt - 1.0}
     best = max(ok, key=lambda k: ok[k][0])
@@ -94,6 +94,7 @@ def summary(out):
     for name in dict.fromkeys([REFERENCE, best]):
         m, s, n = stats(matrices(out, name, 'accuracy_matrix'))
         print(f"{name:10s} {m[0]:6.2f} ± {s[0]:4.2f} {m[1]:6.2f} ± {s[1]:4.2f}  {n}")
+    return best
 
 
 def main():

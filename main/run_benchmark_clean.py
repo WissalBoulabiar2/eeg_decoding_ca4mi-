@@ -20,6 +20,10 @@ NAMES = {'finetuning': 'Finetuning', 'ewc': 'EWC', 'er': 'ER', 'der': 'DER', 'mu
 
 
 class CleanBaselineTrainer(EEGTrainer):
+    def run_single_experiment(self, run_index):
+        # seed_offset: run one given seed in its own process (seed and result files use run_index + offset)
+        return super().run_single_experiment(run_index + int(self.args.get('seed_offset', 0)))
+
     def initialize_dataloader(self):
         from dataloaders import dataloader_clean_benchmark as clean
         if self.args.experiment in ('ewc', 'finetuning'):
@@ -77,19 +81,21 @@ def main():
     parser.add_argument('--mp_dir', type=str, help='CA4MI-MP checkpoint dir to include in the table')
     parser.add_argument('--proto_dir', type=str, help='ProtoMem checkpoint dir to include in the table')
     parser.add_argument('--n_subjects', type=int, default=9)
+    parser.add_argument('--seed_offset', type=int, default=0, help='run seeds seed_offset .. seed_offset+n_runs-1')
     parser.add_argument('--set', nargs='*', default=[], metavar='KEY=VALUE',
                         help='extra config overrides for every baseline (e.g. a fast test)')
     flags = parser.parse_args()
 
     if not flags.summary:
         for method in flags.methods:
-            done = baseline_runs(flags.out, method, flags.n_subjects)
-            if len(done) >= flags.n_runs:
-                print(f"skip {method}: {len(done)} runs already done")
+            seeds = range(flags.seed_offset, flags.seed_offset + flags.n_runs)
+            if all(glob.glob(f"{flags.out}/{method}/**/acc_run_{s}_subject_{flags.n_subjects}.txt", recursive=True)
+                   for s in seeds):
+                print(f"skip {method}: seeds {list(seeds)} already done")
                 continue
             args = OmegaConf.load(f'./configs/{method}.yml')
             override = {'data_dir': flags.data_dir, 'n_runs': flags.n_runs, 'n_subjects': flags.n_subjects,
-                        'checkpoint': os.path.join(flags.out, method)}
+                        'seed_offset': flags.seed_offset, 'checkpoint': os.path.join(flags.out, method)}
             if flags.device:
                 override['device'] = flags.device
             args = OmegaConf.merge(args, override, OmegaConf.from_dotlist(flags.set))
