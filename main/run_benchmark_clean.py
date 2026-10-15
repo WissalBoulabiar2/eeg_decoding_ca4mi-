@@ -42,19 +42,20 @@ def baseline_runs(out, method, n_subjects=9):
     return [metrics(np.loadtxt(f), np.loadtxt(f.replace('acc_run_', 'f1_run_'))) for f in by_seed.values()]
 
 
-def mp_runs(mp_dir, prefix='ca4mi_mp'):
-    files = sorted(glob.glob(f"{mp_dir}/**/{prefix}_9_subjects_seed_*/accuracy_matrix.txt", recursive=True))
+def mp_runs(mp_dir, prefix='ca4mi_mp', n_subjects=9):
+    files = sorted(glob.glob(f"{mp_dir}/**/{prefix}_{n_subjects}_subjects_seed_*/accuracy_matrix.txt",
+                             recursive=True))
     by_seed = {os.path.basename(os.path.dirname(f)).rsplit('_', 1)[1]: f for f in files}
     return [metrics(np.loadtxt(f), np.loadtxt(f.replace('accuracy_matrix', 'f1_macro_matrix')))
             for f in by_seed.values()]
 
 
-def summary(out, mp_dir=None, proto_dir=None):
-    rows = [(NAMES[m], baseline_runs(out, m)) for m in METHODS]
+def summary(out, mp_dir=None, proto_dir=None, n_subjects=9):
+    rows = [(NAMES[m], baseline_runs(out, m, n_subjects)) for m in METHODS]
     if mp_dir:
-        rows.append(('CA4MI-MP', mp_runs(mp_dir)))
+        rows.append(('CA4MI-MP', mp_runs(mp_dir, n_subjects=n_subjects)))
     if proto_dir:
-        rows.append(('ProtoMem (ours)', mp_runs(proto_dir, prefix='protomem')))
+        rows.append(('ProtoMem (ours)', mp_runs(proto_dir, prefix='protomem', n_subjects=n_subjects)))
     print(f"\n{'Method':18s} {'ACC (%)':>14s} {'BWT (%)':>14s} {'Forgetting':>14s} {'F1 (%)':>14s}  seeds")
     for name, runs in rows:
         if not runs:
@@ -75,23 +76,26 @@ def main():
     parser.add_argument('--summary', action='store_true', help='only print the results table')
     parser.add_argument('--mp_dir', type=str, help='CA4MI-MP checkpoint dir to include in the table')
     parser.add_argument('--proto_dir', type=str, help='ProtoMem checkpoint dir to include in the table')
+    parser.add_argument('--n_subjects', type=int, default=9)
+    parser.add_argument('--set', nargs='*', default=[], metavar='KEY=VALUE',
+                        help='extra config overrides for every baseline (e.g. a fast test)')
     flags = parser.parse_args()
 
     if not flags.summary:
         for method in flags.methods:
-            done = baseline_runs(flags.out, method)
+            done = baseline_runs(flags.out, method, flags.n_subjects)
             if len(done) >= flags.n_runs:
                 print(f"skip {method}: {len(done)} runs already done")
                 continue
             args = OmegaConf.load(f'./configs/{method}.yml')
-            override = {'data_dir': flags.data_dir, 'n_runs': flags.n_runs,
+            override = {'data_dir': flags.data_dir, 'n_runs': flags.n_runs, 'n_subjects': flags.n_subjects,
                         'checkpoint': os.path.join(flags.out, method)}
             if flags.device:
                 override['device'] = flags.device
-            args = OmegaConf.merge(args, override)
+            args = OmegaConf.merge(args, override, OmegaConf.from_dotlist(flags.set))
             print("\n" + "=" * 80 + f"\nCLEAN BENCHMARK: {method}  (n_runs={args.n_runs})\n" + "=" * 80)
             CleanBaselineTrainer(args).run_full_experiment()
-    summary(flags.out, flags.mp_dir, flags.proto_dir)
+    summary(flags.out, flags.mp_dir, flags.proto_dir, flags.n_subjects)
 
 
 if __name__ == '__main__':
