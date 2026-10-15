@@ -79,6 +79,8 @@ class EEGTrainerMP(EEGTrainer):
         lss = np.zeros((num_subjects, num_subjects), dtype=np.float32)
         f1_mat = np.zeros((num_subjects, num_subjects), dtype=np.float32)
         inf_time_mat = np.zeros((num_subjects, num_subjects), dtype=np.float32)
+        # Same matrix on the validation trials: hyperparameters are selected on it, never on the test matrix
+        self.val_acc = np.zeros((num_subjects, num_subjects), dtype=np.float32)
         updated_refEA = None
 
         for t in range(num_subjects):
@@ -143,6 +145,9 @@ class EEGTrainerMP(EEGTrainer):
         avg_acc, gem_bwt, avg_f1, inf_time_mat = utils.print_log_acc_bwt_f1_inference_time(
             acc, lss, f1_mat, inf_time_mat, output_path=output_path, run_id=run_index)
         self.save_matrices_ca4mi(acc, f1_mat)
+        base_dir = os.path.join(self.args.checkpoint,
+                                f"{self.args.experiment}_{self.args.n_subjects}_subjects_seed_{self.args.seed}")
+        np.savetxt(os.path.join(base_dir, "val_accuracy_matrix.txt"), self.val_acc, '%.6f')
 
         return {'avg_acc': avg_acc, 'bwt': gem_bwt, 'avg_f1': avg_f1, 'inf_time_mat': inf_time_mat}
 
@@ -171,6 +176,7 @@ class EEGTrainerMP(EEGTrainer):
             lss[t, u] = res['loss_cls']
             f1_mat[t, u] = res['f1_macro']
             inf_time_mat[t, u] = res['avg_inf_time']
+            self.val_acc[t, u] = ca4mi.test_previous_subjects(dataset[u]['valid'], u, model=model)['acc_cls']
             if self.diagnostics is not None:
                 self.diagnostics.log_test(model, dataset[u]['test'], t, u)
 
