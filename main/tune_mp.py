@@ -60,7 +60,17 @@ GRID_PROTOMEM3 = {
     'consol10': _R3 + ['consolidate_epochs=10'],
     'bntrain': _R3 + ['freeze_past_bn=no'],             # past subjects' BN affine trainable through replay
 }
-GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2, 'protomem3': GRID_PROTOMEM3}
+# ProtoMem round 4 (last), around the configuration selected in round 3 (mem100): plasticity
+_R4 = ['n_samples=100', 'distill_reg=1.0']
+GRID_PROTOMEM4 = {
+    'ref_m100': _R4,
+    'aug': _R4 + ['augment=yes'],                       # EEG data augmentation
+    'aug_strong': _R4 + ['augment=yes', 'aug_shift=100', 'aug_noise=0.1'],
+    'noEA': _R4 + ['ea=no'],                            # the baselines use no alignment
+    'consol10': _R4 + ['consolidate_epochs=10'],        # best validation BWT among the round-3 consolidations
+}
+GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2, 'protomem3': GRID_PROTOMEM3,
+         'protomem4': GRID_PROTOMEM4}
 
 
 def run_command(method, out, name, data_dir, seed, extra):

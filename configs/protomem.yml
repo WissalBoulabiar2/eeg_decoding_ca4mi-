@@ -46,3 +46,8 @@ drift_comp: 'yes'             # shift the modes by the drift measured on exempla
 freeze_past_bn: 'yes'         # 'no': past subjects' BN affine parameters stay trainable through replay
 consolidate_epochs: 0         # > 0: balanced fine-tuning on all subjects' exemplars after each subject
 consolidate_lr_factor: 0.1    # its learning rate = lr * factor
+#### Data augmentation (training batches only)
+augment: 'no'                 # 'yes': random time shift + amplitude scaling + Gaussian noise
+aug_shift: 50                 # max time shift in samples (50 = 0.2 s at 250 Hz)
+aug_scale: 0.1                # amplitude scaling in [1 - s, 1 + s]
+aug_noise: 0.05               # noise std relative to the trial std

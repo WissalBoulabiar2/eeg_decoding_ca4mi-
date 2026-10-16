@@ -55,6 +55,18 @@ class ProtoMem:
     def predict(self, x, sub):
         return self.net.logits(self._embed_eval(x, sub))
 
+    def _augment(self, x):
+        """augment='yes': random time shift (one per batch), per-trial amplitude scaling and Gaussian noise
+        relative to each trial's standard deviation. Applied to training batches only."""
+        a = self.args
+        if not enabled(a, 'augment', 'no'):
+            return x
+        shift = int(torch.randint(-int(a.aug_shift), int(a.aug_shift) + 1, (1,)).item())
+        x = torch.roll(x, shift, dims=-1)
+        scale = 1 + float(a.aug_scale) * (2 * torch.rand(len(x), 1, 1, device=x.device) - 1)
+        noise = float(a.aug_noise) * torch.randn_like(x) * x.std(dim=(1, 2), keepdim=True)
+        return x * scale + noise
+
     def _sample_memory(self, n):
         m = self.memory
         idx = torch.randint(len(m), (n,), device=m.mu.device)
@@ -86,7 +98,7 @@ class ProtoMem:
             perm = torch.randperm(len(x), device=self.device)
             for i in range(0, len(x), int(a.batch_size)):
                 idx = perm[i:i + int(a.batch_size)]
-                logits = self.net(x[idx], sub[idx])
+                logits = self.net(self._augment(x[idx]), sub[idx])
                 loss = F.cross_entropy(logits, y[idx])
                 rep = is_rep[idx]
                 if self.distill_reg > 0 and rep.any():
@@ -139,7 +151,7 @@ class ProtoMem:
             perm = torch.randperm(len(x), device=self.device)
             for i in range(0, len(x), int(a.batch_size)):
                 idx = perm[i:i + int(a.batch_size)]
-                loss = F.cross_entropy(self.net(x[idx], sub[idx]), y[idx])
+                loss = F.cross_entropy(self.net(self._augment(x[idx]), sub[idx]), y[idx])
                 if self.gen_reg > 0 and len(self.memory) > 0:
                     zp, yp = self._sample_memory(len(idx))
                     loss = loss + self.gen_reg * F.cross_entropy(self.net.logits(zp), yp)
