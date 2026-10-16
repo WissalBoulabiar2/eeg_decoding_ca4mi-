@@ -69,8 +69,18 @@ GRID_PROTOMEM4 = {
     'noEA': _R4 + ['ea=no'],                            # the baselines use no alignment
     'consol10': _R4 + ['consolidate_epochs=10'],        # best validation BWT among the round-3 consolidations
 }
+# ProtoMem round 5, around consol10 (round 4): consolidation strength and learning rate. Selection seeds 0-2 only;
+# the final evaluation (main/run_final.py) uses seeds that were never used for any choice.
+_R5 = ['n_samples=100', 'distill_reg=1.0', 'consolidate_epochs=10']
+GRID_PROTOMEM5 = {
+    'ref_c10': _R5,
+    'consol20': _R5 + ['consolidate_epochs=20'],
+    'consol10_lr0.3': _R5 + ['consolidate_lr_factor=0.3'],
+    'consol10_lr3e-4': _R5 + ['lr=0.0003'],
+    'consol20_lr3e-4': _R5 + ['consolidate_epochs=20', 'lr=0.0003'],
+}
 GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2, 'protomem3': GRID_PROTOMEM3,
-         'protomem4': GRID_PROTOMEM4}
+         'protomem4': GRID_PROTOMEM4, 'protomem5': GRID_PROTOMEM5}
 
 
 def run_command(method, out, name, data_dir, seed, extra):

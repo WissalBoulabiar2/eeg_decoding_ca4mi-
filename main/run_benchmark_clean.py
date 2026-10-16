@@ -14,9 +14,13 @@ import glob
 import numpy as np
 from omegaconf import OmegaConf
 from trainer import EEGTrainer
+import utils
+
+os.environ.setdefault('WANDB_MODE', 'disabled')  # the original CA4MI code calls wandb.init without a mode
 
 METHODS = ['finetuning', 'ewc', 'er', 'der', 'mudvi', 'cger']
-NAMES = {'finetuning': 'Finetuning', 'ewc': 'EWC', 'er': 'ER', 'der': 'DER', 'mudvi': 'MUDVI', 'cger': 'CGER'}
+NAMES = {'finetuning': 'Finetuning', 'ewc': 'EWC', 'er': 'ER', 'der': 'DER', 'mudvi': 'MUDVI', 'cger': 'CGER',
+         'ca4mi': 'CA4MI'}
 
 
 class CleanBaselineTrainer(EEGTrainer):
@@ -28,9 +32,35 @@ class CleanBaselineTrainer(EEGTrainer):
         from dataloaders import dataloader_clean_benchmark as clean
         if self.args.experiment in ('ewc', 'finetuning'):
             return clean.CleanBaselineStreaming(self.args)
-        if self.args.experiment in ('er', 'der', 'mudvi', 'cger'):
+        if self.args.experiment in ('er', 'der', 'mudvi', 'cger', 'ca4mi'):
             return clean.CleanReplayStreaming(self.args)
         raise NotImplementedError(self.args.experiment)
+
+
+class CleanCA4MITrainer(CleanBaselineTrainer):
+    """Original CA4MI algorithm (methods/ca4mi.py, EEGTrainer.run_ca4mi) on the clean protocol.
+    Only two things differ from the original code, the same ones as for every other method:
+      - data: subject order S1 -> S9, identical trials, replay with true labels in the training split only;
+      - evaluation: past subjects are tested with the trained shared encoder. The original passes
+        ca4mi.load_current_models(u), a freshly initialised network (main/trainer.py:233).
+    Its losses, prototypes, IEA, mixup, checkpoint selection and replay routing are untouched."""
+
+    def evaluate_all_previous_subjects(self, ca4mi, dataset, t, acc, lss, f1_mat, inf_time_mat):
+        for u in range(t + 1):
+            model = utils.load_model_with_shared_update(
+                network_class=ca4mi.network.Cls_HEAD, args=ca4mi.args, current_model=ca4mi.model,
+                checkpoint_dir=ca4mi.checkpoint, sub_id=u)
+            res = ca4mi.test_previous_subjects(dataset[u]['test'], u, model=model)
+            print(f">>> Test on {dataset[u]['name']:15s}: acc={res['acc_cls']:5.2f}%")
+            acc[t, u], lss[t, u] = res['acc_cls'], res['loss_cls']
+            f1_mat[t, u], inf_time_mat[t, u] = res['f1_macro'], res['avg_inf_time']
+
+
+def result_exists(out, method, seed, n_subjects=9):
+    if method == 'ca4mi':
+        return bool(glob.glob(f"{out}/ca4mi/**/ca4mi_{n_subjects}_subjects_seed_{seed}/accuracy_matrix.txt",
+                              recursive=True))
+    return bool(glob.glob(f"{out}/{method}/**/acc_run_{seed}_subject_{n_subjects}.txt", recursive=True))
 
 
 def metrics(acc, f1):
@@ -56,6 +86,9 @@ def mp_runs(mp_dir, prefix='ca4mi_mp', n_subjects=9):
 
 def summary(out, mp_dir=None, proto_dir=None, n_subjects=9):
     rows = [(NAMES[m], baseline_runs(out, m, n_subjects)) for m in METHODS]
+    ca4mi = mp_runs(f"{out}/ca4mi", prefix='ca4mi', n_subjects=n_subjects)
+    if ca4mi:
+        rows.append(('CA4MI', ca4mi))
     if mp_dir:
         rows.append(('CA4MI-MP', mp_runs(mp_dir, n_subjects=n_subjects)))
     if proto_dir:
@@ -72,7 +105,7 @@ def summary(out, mp_dir=None, proto_dir=None, n_subjects=9):
 
 def main():
     parser = argparse.ArgumentParser(description='Baselines on the clean CA4MI-MP protocol')
-    parser.add_argument('--methods', nargs='*', default=METHODS, choices=METHODS)
+    parser.add_argument('--methods', nargs='*', default=METHODS, choices=METHODS + ['ca4mi'])
     parser.add_argument('--data_dir', type=str)
     parser.add_argument('--n_runs', type=int, default=3)
     parser.add_argument('--out', type=str, default='./checkpoints/bench_clean')
@@ -89,8 +122,7 @@ def main():
     if not flags.summary:
         for method in flags.methods:
             seeds = range(flags.seed_offset, flags.seed_offset + flags.n_runs)
-            if all(glob.glob(f"{flags.out}/{method}/**/acc_run_{s}_subject_{flags.n_subjects}.txt", recursive=True)
-                   for s in seeds):
+            if all(result_exists(flags.out, method, s, flags.n_subjects) for s in seeds):
                 print(f"skip {method}: seeds {list(seeds)} already done")
                 continue
             args = OmegaConf.load(f'./configs/{method}.yml')
@@ -100,7 +132,8 @@ def main():
                 override['device'] = flags.device
             args = OmegaConf.merge(args, override, OmegaConf.from_dotlist(flags.set))
             print("\n" + "=" * 80 + f"\nCLEAN BENCHMARK: {method}  (n_runs={args.n_runs})\n" + "=" * 80)
-            CleanBaselineTrainer(args).run_full_experiment()
+            trainer = CleanCA4MITrainer if method == 'ca4mi' else CleanBaselineTrainer
+            trainer(args).run_full_experiment()
     summary(flags.out, flags.mp_dir, flags.proto_dir, flags.n_subjects)
 
 
