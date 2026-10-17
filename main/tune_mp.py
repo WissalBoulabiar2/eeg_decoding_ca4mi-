@@ -85,8 +85,15 @@ GRID_PROTOMEM6 = {
     'ema0.99': _R5 + ['ema_decay=0.99'],
     'ema0.995': _R5 + ['ema_decay=0.995'],
 }
+# ProtoMem round 7: balanced current/replay batches (plasticity on new subjects), on top of the round-5 config
+GRID_PROTOMEM7 = {
+    'ref_c10': _R5,
+    'balanced': _R5 + ['balanced_replay=yes'],
+    'balanced_d0.5': _R5 + ['balanced_replay=yes', 'distill_reg=0.5'],
+}
 GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2, 'protomem3': GRID_PROTOMEM3,
-         'protomem4': GRID_PROTOMEM4, 'protomem5': GRID_PROTOMEM5, 'protomem6': GRID_PROTOMEM6}
+         'protomem4': GRID_PROTOMEM4, 'protomem5': GRID_PROTOMEM5, 'protomem6': GRID_PROTOMEM6,
+         'protomem7': GRID_PROTOMEM7}
 
 
 def run_command(method, out, name, data_dir, seed, extra):

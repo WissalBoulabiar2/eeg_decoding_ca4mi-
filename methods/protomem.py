@@ -75,6 +75,25 @@ class ProtoMem:
         z = m.mu[idx] + m.var[idx].clamp_min(0).sqrt() * torch.randn_like(m.mu[idx])
         return F.normalize(z, dim=1), m.labels[idx]
 
+    def _epoch_batches(self, n_own, n_rep):
+        """Index batches of one epoch over [current-subject trials | exemplars].
+        Default: one shuffled pass over the concatenation, so the share of the current subject shrinks as the
+        buffer grows (100 own trials vs 800 exemplars at the 9th subject).
+        balanced_replay='yes': one pass over the current subject's trials, each batch paired with an equal-size
+        batch drawn from the exemplars (separate replay batch, Chaudhry et al. 2019), so the current subject keeps
+        half of every batch whatever the buffer size."""
+        bs = int(self.args.batch_size)
+        if enabled(self.args, 'balanced_replay', 'no') and n_rep > 0:
+            perm = torch.randperm(n_own, device=self.device)
+            for i in range(0, n_own, bs):
+                own = perm[i:i + bs]
+                rep = n_own + torch.randint(n_rep, (len(own),), device=self.device)
+                yield torch.cat([own, rep])
+        else:
+            perm = torch.randperm(n_own + n_rep, device=self.device)
+            for i in range(0, n_own + n_rep, bs):
+                yield perm[i:i + bs]
+
     # ------------------------------------------------------------------ training
     def train_subject(self, t, x_tr, y_tr, x_va, y_va):
         a = self.args
@@ -102,9 +121,7 @@ class ProtoMem:
         selected = ema if ema is not None else self.net
         for epoch in range(1, int(a.n_epochs) + 1):
             self.net.train()
-            perm = torch.randperm(len(x), device=self.device)
-            for i in range(0, len(x), int(a.batch_size)):
-                idx = perm[i:i + int(a.batch_size)]
+            for idx in self._epoch_batches(len(y_tr), len(x) - len(y_tr)):
                 logits = self.net(self._augment(x[idx]), sub[idx])
                 loss = F.cross_entropy(logits, y[idx])
                 rep = is_rep[idx]
