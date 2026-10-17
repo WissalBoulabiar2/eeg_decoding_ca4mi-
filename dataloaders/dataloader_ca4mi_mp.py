@@ -12,6 +12,16 @@ from dataloaders.dataloader_ca4mi import EEGData_ca4mi, IncrementalDataStreaming
 
 class IncrementalDataStreamingMP(IncrementalDataStreaming):
 
+    def __init__(self, args):
+        super().__init__(args)
+        # subject_order: optional list of subject numbers (e.g. [4, 5, 7, 3, 9, 1, 2, 6, 8]); default S1 -> SN
+        order = args.get('subject_order', None)
+        if order:
+            order = [int(s) for s in order]
+            assert sorted(order) == list(range(1, args.n_subjects + 1)), f"invalid subject_order {order}"
+            self.subject_queue = order
+            print(f"  Subject order: {['S%d' % s for s in order]}")
+
     def load_data(self, sub_id):
         self.dataloaders[sub_id] = {}
         self.train_set[sub_id] = EEGData_ca4mi(
