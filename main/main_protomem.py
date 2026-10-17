@@ -79,7 +79,9 @@ def run(args, seed):
     np.savetxt(os.path.join(out, 'f1_macro_matrix.txt'), f1, '%.6f')
     np.savetxt(os.path.join(out, 'val_accuracy_matrix.txt'), val, '%.6f')
     bwt = np.sum(acc[-1] - np.diag(acc)) / (n - 1)
-    print(f"seed {seed}: ACC={acc[-1].mean():.2f}  BWT={bwt:.2f}  F1={f1[-1].mean():.2f}  -> {out}")
+    val_bwt = np.sum(val[-1] - np.diag(val)) / (n - 1)
+    print(f"seed {seed}: ACC={acc[-1].mean():.2f}  BWT={bwt:.2f}  F1={f1[-1].mean():.2f}  "
+          f"valACC={val[-1].mean():.2f}  valBWT={val_bwt:.2f}  -> {out}")
     return acc[-1].mean(), bwt
 
 

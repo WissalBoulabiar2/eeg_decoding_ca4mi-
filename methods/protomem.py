@@ -47,13 +47,15 @@ class ProtoMem:
         return torch.optim.Adam(params, lr=lr, weight_decay=float(self.args.weight_decay))
 
     @torch.no_grad()
-    def _embed_eval(self, x, sub, bs=64):
-        self.net.eval()
-        return torch.cat([self.net.embed(x[i:i + bs], sub[i:i + bs]) for i in range(0, len(x), bs)])
+    def _embed_eval(self, x, sub, bs=64, model=None):
+        model = model if model is not None else self.net
+        model.eval()
+        return torch.cat([model.embed(x[i:i + bs], sub[i:i + bs]) for i in range(0, len(x), bs)])
 
     @torch.no_grad()
-    def predict(self, x, sub):
-        return self.net.logits(self._embed_eval(x, sub))
+    def predict(self, x, sub, model=None):
+        model = model if model is not None else self.net
+        return model.logits(self._embed_eval(x, sub, model=model))
 
     def _augment(self, x):
         """augment='yes': random time shift (one per batch), per-trial amplitude scaling and Gaussian noise
@@ -93,6 +95,11 @@ class ProtoMem:
         opt = self._optimizer(lr)
         best_loss, best_state, best_epoch = float('inf'), copy.deepcopy(self.net.state_dict()), 0
         use_gen = self.gen_reg > 0 and len(self.memory) > 0
+        # ema_decay > 0: exponential moving average of the weights (Polyak averaging). The averaged model is the one
+        # validated, selected and kept; it reduces the variance of picking one checkpoint on 22 validation trials.
+        decay = float(a.get('ema_decay', 0.0))
+        ema = copy.deepcopy(self.net) if decay > 0 else None
+        selected = ema if ema is not None else self.net
         for epoch in range(1, int(a.n_epochs) + 1):
             self.net.train()
             perm = torch.randperm(len(x), device=self.device)
@@ -109,12 +116,18 @@ class ProtoMem:
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+                if ema is not None:
+                    with torch.no_grad():
+                        for pe, p in zip(ema.parameters(), self.net.parameters()):
+                            pe.mul_(decay).add_(p.detach(), alpha=1 - decay)
+                        for be, b in zip(ema.buffers(), self.net.buffers()):
+                            be.copy_(b)
 
-            v_loss = F.cross_entropy(self.predict(x_va, sub_va), y_va).item()
+            v_loss = F.cross_entropy(self.predict(x_va, sub_va, model=selected), y_va).item()
             if epoch < int(a.min_select_epoch):
                 continue
             if v_loss < best_loss:
-                best_loss, best_state, best_epoch, patience = v_loss, copy.deepcopy(self.net.state_dict()), epoch, int(a.patience)
+                best_loss, best_state, best_epoch, patience = v_loss, copy.deepcopy(selected.state_dict()), epoch, int(a.patience)
             else:
                 patience -= 1
                 if patience <= 0:

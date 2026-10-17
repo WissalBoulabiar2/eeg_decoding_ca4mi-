@@ -60,28 +60,30 @@ def protomem_cmd(checkpoint, data_dir, seed, extra):
             '--checkpoint', checkpoint, '--set', f"data_dir={data_dir}", f"seed_offset={seed}", *extra]
 
 
-def selection_jobs(out, data_dir, sel_seeds):
+def selection_jobs(out, data_dir, sel_seeds, grid, tag):
     jobs = []
-    for cfg, extra in tune_mp.GRID_PROTOMEM5.items():
+    for cfg, extra in grid.items():
         for s in sel_seeds:
-            done = os.path.exists(f"{out}/tune5/{cfg}/protomem_9_subjects_seed_{s}/val_accuracy_matrix.txt")
+            done = os.path.exists(f"{out}/{tag}/{cfg}/protomem_9_subjects_seed_{s}/val_accuracy_matrix.txt")
             jobs.append(('protomem', f"[A selection] ProtoMem {cfg} seed {s}", done,
-                         protomem_cmd(f"{out}/tune5/{cfg}", data_dir, s, extra)))
+                         protomem_cmd(f"{out}/{tag}/{cfg}", data_dir, s, extra)))
     return jobs
 
 
-def final_jobs(out, data_dir, final_seeds, proto_extra, der_set):
+def final_jobs(out, data_dir, final_seeds, proto_extra, der_set, methods):
     jobs = []
     for s in final_seeds:
         jobs.append(('protomem', f"[B final] ProtoMem seed {s}", matrix_file(out, 'protomem', s) is not None,
                      protomem_cmd(f"{out}/final/protomem", data_dir, s, proto_extra)))
-        for m in BASELINES:
+        for m in [m for m in BASELINES if m in methods]:
             cmd = ['python', 'main/run_benchmark_clean.py', '--methods', m, '--data_dir', data_dir, '--n_runs', '1',
                    '--seed_offset', str(s), '--out', f"{out}/final/bench"]
             if m == 'der' and der_set:
                 cmd += ['--set', *der_set]
             kind = 'ca4mi' if m == 'ca4mi' else 'baseline'
             jobs.append((kind, f"[B final] {NAMES[m]} seed {s}", matrix_file(out, m, s) is not None, cmd))
+        if 'ca4mi_mp' not in methods:
+            continue
         jobs.append(('ca4mi', f"[B final] CA4MI-MP seed {s}", matrix_file(out, 'ca4mi_mp', s) is not None,
                      ['python', 'main/main_mp.py', '--config', './configs/ca4mi_mp.yml', '--phase', '5',
                       '--n_runs', '1', '--checkpoint', f"{out}/final/ca4mi_mp", '--set', f"data_dir={data_dir}",
@@ -175,28 +177,34 @@ def main():
     parser.add_argument('--time_limit_h', type=float, default=11.0)
     parser.add_argument('--after_run', type=str, default=None)
     parser.add_argument('--table_only', action='store_true')
+    parser.add_argument('--grid', default='protomem5', choices=[g for g in tune_mp.GRIDS if g.startswith('protomem')],
+                        help='ProtoMem selection grid (stage A)')
+    parser.add_argument('--final_methods', nargs='*', default=BASELINES + ['ca4mi_mp'],
+                        choices=BASELINES + ['ca4mi_mp'],
+                        help='methods re-run in stage B besides ProtoMem (none: ProtoMem only)')
     flags = parser.parse_args()
     os.makedirs(flags.out, exist_ok=True)
+    grid, tag = tune_mp.GRIDS[flags.grid], f"tune_{flags.grid}"
 
     if not flags.table_only:
         t0, durations = time.time(), {}
-        sel = selection_jobs(flags.out, flags.data_dir, flags.selection_seeds)
-        n_final = len(flags.final_seeds) * (len(BASELINES) + 2)
+        sel = selection_jobs(flags.out, flags.data_dir, flags.selection_seeds, grid, tag)
+        n_final = len(flags.final_seeds) * (1 + len(flags.final_methods))
         n_total = len(sel) + n_final
         n_done = sum(j[2] for j in sel)
         print(f"\n{n_total} jobs in total ({len(sel)} selection + {n_final} final): "
               f"{n_done} selection jobs already done\n", flush=True)
         if not run_jobs(sel, flags.out, t0, flags.time_limit_h, flags.after_run, durations, n_total, 0):
             return
-        print("\n" + "=" * 80 + "\nA. PROTOMEM ROUND 5: SELECTION ON VALIDATION (seeds "
+        print("\n" + "=" * 80 + f"\nA. PROTOMEM {flags.grid}: SELECTION ON VALIDATION (seeds "
               f"{flags.selection_seeds})\n" + "=" * 80)
-        tune_mp.GRID = tune_mp.GRID_PROTOMEM5
-        best = tune_mp.summary(f"{flags.out}/tune5")
+        tune_mp.GRID = grid
+        best = tune_mp.summary(f"{flags.out}/{tag}")
         with open(os.path.join(flags.out, 'selected_config.txt'), 'w') as f:
-            f.write(f"{best}: {' '.join(tune_mp.GRID_PROTOMEM5[best])}\n")
-        print(f"\nProtoMem final configuration: {best} -> {tune_mp.GRID_PROTOMEM5[best]}")
+            f.write(f"{best}: {' '.join(grid[best])}\n")
+        print(f"\nProtoMem final configuration: {best} -> {grid[best]}")
         der_set = [f"der_epochs={flags.der_epochs}"] if flags.der_epochs else []
-        fin = final_jobs(flags.out, flags.data_dir, flags.final_seeds, tune_mp.GRID_PROTOMEM5[best], der_set)
+        fin = final_jobs(flags.out, flags.data_dir, flags.final_seeds, grid[best], der_set, flags.final_methods)
         if not run_jobs(fin, flags.out, t0, flags.time_limit_h, flags.after_run, durations, n_total, len(sel)):
             return
     final_table(flags.out, flags.final_seeds)

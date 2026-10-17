@@ -79,8 +79,14 @@ GRID_PROTOMEM5 = {
     'consol10_lr3e-4': _R5 + ['lr=0.0003'],
     'consol20_lr3e-4': _R5 + ['consolidate_epochs=20', 'lr=0.0003'],
 }
+# ProtoMem round 6: weight averaging (EMA) on top of the round-5 configuration, to reduce run-to-run variance
+GRID_PROTOMEM6 = {
+    'ref_c10': _R5,
+    'ema0.99': _R5 + ['ema_decay=0.99'],
+    'ema0.995': _R5 + ['ema_decay=0.995'],
+}
 GRIDS = {'ca4mi_mp': GRID, 'protomem': GRID_PROTOMEM, 'protomem2': GRID_PROTOMEM2, 'protomem3': GRID_PROTOMEM3,
-         'protomem4': GRID_PROTOMEM4, 'protomem5': GRID_PROTOMEM5}
+         'protomem4': GRID_PROTOMEM4, 'protomem5': GRID_PROTOMEM5, 'protomem6': GRID_PROTOMEM6}
 
 
 def run_command(method, out, name, data_dir, seed, extra):
