@@ -43,6 +43,20 @@ def parse_studies(path, n):
     return out
 
 
+def read_studies_dir(root):
+    """{tag: {seed: matrix}} from the result folders of run_protomem_studies.py (buffer_<n>/, order_random/)."""
+    import glob
+    out = defaultdict(dict)
+    for f in glob.glob(os.path.join(root, "**", "protomem_*_subjects_seed_*", "accuracy_matrix.txt"), recursive=True):
+        parts = os.path.normpath(f).split(os.sep)
+        study = next((p for p in parts if p.startswith("buffer_") or p == "order_random"), None)
+        if study is None:
+            continue
+        tag = f"buffer {study.split('_')[1]}" if study.startswith("buffer_") else "order random"
+        out[tag][int(parts[-2].rsplit("_", 1)[1])] = np.loadtxt(f)
+    return out
+
+
 def acc_bwt(a):
     n = len(a)
     return a[-1].mean(), np.sum(a[-1] - np.diag(a)) / (n - 1)
@@ -59,7 +73,8 @@ def seen_curve(mats):
 
 def buffer_figure(studies, final, out):
     sizes, means, stds = [], [], []
-    for nb in [0, 20, 50, 100, 200]:
+    # 200 is not drawn: on BCI-IV 2a a subject has 100 training trials, so 200 stores the same trials as 100
+    for nb in [0, 20, 50, 100]:
         mats = final.get("ProtoMem", {}) if nb == 100 else studies.get(f"buffer {nb}", {})
         if not mats:
             print(f"buffer {nb}: no run found, skipped")
@@ -80,8 +95,8 @@ def buffer_figure(studies, final, out):
         if k == 1:
             ax.axhline(0, color="gray", lw=0.8)
         ax.set_xticks(x)
-        ax.set_xticklabels([str(s) for s in sizes])
-        ax.set_xlabel("Exemplars per subject")
+        ax.set_xticklabels([f"{s}\n(all trials)" if s == 100 else str(s) for s in sizes])
+        ax.set_xlabel("Exemplars stored per subject")
         ax.set_ylabel("ACC (%)" if k == 0 else "BWT (%)")
         ax.set_title(f"Effect of buffer size on {name}")
         ax.grid(alpha=0.3)
@@ -109,8 +124,9 @@ def order_figure(studies, final, out):
     xb, w = np.arange(2), 0.38
     for off, m, s, c, lab in [(-w / 2, ms, ss, "blue", "Sequential order"), (w / 2, mr, sr, "#e8463c", "Random order")]:
         bars = a2.bar(xb + off, m, w, yerr=s, capsize=4, color=c, label=lab)
-        for b, v in zip(bars, m):
-            a2.text(b.get_x() + b.get_width() / 2, v + (1.5 if v >= 0 else -4), f"{v:.1f}", ha="center", fontsize=10)
+        for b, v, e in zip(bars, m, s):
+            a2.text(b.get_x() + b.get_width() / 2, v + e + 1.5 if v >= 0 else v - e - 5, f"{v:.1f}",
+                    ha="center", fontsize=10)
     a2.axhline(0, color="gray", lw=0.8)
     a2.set_xticks(xb); a2.set_xticklabels(["ACC (%)", "BWT (%)"])
     a2.set_title("(b) Final performance"); a2.grid(axis="y", alpha=0.3); a2.legend(loc="upper right")
@@ -129,7 +145,13 @@ def main():
     parser.add_argument("final_log")
     parser.add_argument("--n_subjects", type=int, default=9)
     flags = parser.parse_args()
-    studies = parse_studies(flags.studies_log, flags.n_subjects) if os.path.exists(flags.studies_log) else {}
+    if os.path.isdir(flags.studies_log):
+        studies = read_studies_dir(flags.studies_log)
+    elif os.path.exists(flags.studies_log):
+        studies = parse_studies(flags.studies_log, flags.n_subjects)
+    else:
+        studies = {}
+    print({k: sorted(v) for k, v in studies.items()})
     final = parse_log(flags.final_log, flags.n_subjects)
     buffer_figure(studies, final, "buffer_protomem.pdf")
     order_figure(studies, final, "order_protomem.pdf")

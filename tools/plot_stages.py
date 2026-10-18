@@ -62,9 +62,32 @@ def parse_log(path, n):
     return out
 
 
+def read_final_dir(root):
+    """{method: {seed: matrix}} from the output folder of main/run_final.py (<root>/final/...)."""
+    import glob
+    import os
+    out = defaultdict(dict)
+    names = {'finetuning': 'Finetuning', 'ewc': 'EWC', 'er': 'ER', 'der': 'DER', 'mudvi': 'MUDVI', 'cger': 'CGER'}
+    for key, name in names.items():
+        for f in glob.glob(f"{root}/final/bench/{key}/**/acc_run_*_subject_9.txt", recursive=True):
+            out[name][int(os.path.basename(f).split('_')[2])] = np.loadtxt(f)
+    for name, pat in [('CA4MI', f"{root}/final/bench/ca4mi/**/ca4mi_9_subjects_seed_*/accuracy_matrix.txt"),
+                      ('CA4MI-MP', f"{root}/final/ca4mi_mp/**/ca4mi_mp_9_subjects_seed_*/accuracy_matrix.txt"),
+                      ('ProtoMem', f"{root}/final/protomem/**/protomem_9_subjects_seed_*/accuracy_matrix.txt")]:
+        for f in glob.glob(pat, recursive=True):
+            out[name][int(os.path.basename(os.path.dirname(f)).rsplit('_', 1)[1])] = np.loadtxt(f)
+    return out
+
+
+def load_runs(path, n):
+    """A saved log of run_final.py, or its output folder."""
+    import os
+    return read_final_dir(path) if os.path.isdir(path) else parse_log(path, n)
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("log")
+    parser.add_argument("log", help="saved log of run_final.py, or its output folder (e.g. final_bal)")
     parser.add_argument("--n_subjects", type=int, default=9)
     parser.add_argument("--seed", type=int, default=None, help="plot one seed instead of the mean over seeds")
     parser.add_argument("--with_mp", action="store_true", help="also plot CA4MI-MP")
@@ -73,7 +96,7 @@ def main():
     flags = parser.parse_args()
 
     n = flags.n_subjects
-    runs = parse_log(flags.log, n)
+    runs = load_runs(flags.log, n)
     data = {}
     for m, by_seed in runs.items():
         if m not in STYLE or (m == "CA4MI-MP" and not flags.with_mp):
