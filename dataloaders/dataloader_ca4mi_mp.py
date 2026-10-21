@@ -27,8 +27,10 @@ class IncrementalDataStreamingMP(IncrementalDataStreaming):
         self.train_set[sub_id] = EEGData_ca4mi(
             root=self.root, args=self.args, sub=self.subject_queue[sub_id], memory=None, sub_id=sub_id)
 
+        # The split depends on the subject, not on its position in the stream, so that every subject order
+        # uses exactly the same train / valid / test trials (identical to seed + sub_id for the default order S1 -> SN)
         train_indices, valid_indices, test_indices = self.stratified_split(
-            self.train_set[sub_id], self.pc_valid, self.pc_test, random_state=self.seed + sub_id)
+            self.train_set[sub_id], self.pc_valid, self.pc_test, random_state=self.seed + self.subject_queue[sub_id] - 1)
 
         for split, indices in [('train', train_indices), ('valid', valid_indices), ('test', test_indices)]:
             # Unshuffled: EEGTrainer.align_data rebuilds the loaders (and shuffles the training one)

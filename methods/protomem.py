@@ -199,12 +199,30 @@ class ProtoMem:
             r = self.replay
             feat_new = self._embed_eval(r['x'], r['sub'])
             m = self.memory
-            for u in r['sub'].unique().tolist():
+            if a.get('drift_weighting', 'dominant') == 'weighted':
+                # a merged mode is shifted by the drifts of all the subjects it summarises, weighted by their
+                # number of trials in the mode (m.comp); subjects without exemplars do not contribute
                 for c in range(a.n_classes):
-                    sel = (r['sub'] == u) & (r['y'] == c)
-                    ent = (m.subjects == u) & (m.labels == c)
-                    if sel.any() and ent.any():
-                        m.mu[ent] = m.mu[ent] + (feat_new[sel] - r['feat'][sel]).mean(0)
+                    ent = m.labels == c
+                    if not ent.any():
+                        continue
+                    num = torch.zeros_like(m.mu[ent])
+                    den = torch.zeros(int(ent.sum()), 1, device=m.mu.device)
+                    for u in r['sub'].unique().tolist():
+                        sel = (r['sub'] == u) & (r['y'] == c)
+                        if sel.any():
+                            w = m.comp[ent][:, u:u + 1]
+                            num += w * (feat_new[sel] - r['feat'][sel]).mean(0)
+                            den += w
+                    m.mu[ent] = m.mu[ent] + num / den.clamp_min(1e-8)
+            else:
+                # each mode is shifted by the drift of the subject it is attributed to (dominant subject)
+                for u in r['sub'].unique().tolist():
+                    for c in range(a.n_classes):
+                        sel = (r['sub'] == u) & (r['y'] == c)
+                        ent = (m.subjects == u) & (m.labels == c)
+                        if sel.any() and ent.any():
+                            m.mu[ent] = m.mu[ent] + (feat_new[sel] - r['feat'][sel]).mean(0)
             r['feat'] = feat_new
             if int(a.get('consolidate_epochs', 0)) > 0:
                 # after consolidation the distillation target is the improved state, not the original one

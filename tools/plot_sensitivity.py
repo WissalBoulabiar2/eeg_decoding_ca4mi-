@@ -49,9 +49,9 @@ def main():
             print(f"gen={g} tau={t}: BWT {grids['bwt'][(g, t)]:6.2f}  plasticity {grids['plast'][(g, t)]:6.2f}  "
                   f"seeds {sorted(mats)}")
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.6))
-    for ax, key, title, cmap, cbar in [(axes[0], "bwt", "Stability", "RdBu_r", "Accuracy change, BWT (%)"),
-                                       (axes[1], "plast", "Plasticity", "viridis", "Accuracy on new subjects (%)")]:
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.9))
+    for ax, key, title, cmap, cbar in [(axes[0], "bwt", "Stability", "RdBu_r", "Accuracy change (%)"),
+                                       (axes[1], "plast", "Plasticity", "viridis", "Accuracy (%)")]:
         M = np.full((len(TAU), len(GEN)), np.nan)
         for i, t in enumerate(TAU):
             for j, g in enumerate(GEN):
@@ -64,14 +64,16 @@ def main():
         for i in range(len(TAU)):
             for j in range(len(GEN)):
                 if not np.isnan(M[i, j]):
-                    ax.text(j, i, f"{M[i, j]:.2f}", ha="center", va="center", fontsize=10,
-                            color="white" if key == "plast" and M[i, j] < np.nanmean(M) else "black")
-        ax.set_xticks(range(len(GEN))); ax.set_xticklabels([str(g) for g in GEN])
-        ax.set_yticks(range(len(TAU))); ax.set_yticklabels([str(t) for t in TAU])
-        ax.set_xlabel(r"Prototype (pseudo-feature) loss weight $\lambda_{\mathrm{gen}}$")
-        ax.set_ylabel(r"Classifier temperature $\tau$")
-        ax.set_title(title)
-        fig.colorbar(im, ax=ax, label=cbar)
+                    ax.text(j, i, f"{M[i, j]:.2f}", ha="center", va="center", fontsize=8,
+                            color="white" if (key == "bwt" and abs(M[i, j]) > 0.8 * lim) or (key == "plast" and
+                                  M[i, j] < (np.nanmin(M) + np.nanmax(M)) / 2) else "black")
+        ax.set_xticks(range(len(GEN))); ax.set_xticklabels([str(g) for g in GEN], fontsize=8)
+        ax.set_yticks(range(len(TAU))); ax.set_yticklabels([str(t) for t in TAU], fontsize=8)
+        ax.set_xlabel(r"Pseudo-feature loss weight $\lambda_{\mathrm{gen}}$", fontsize=8)
+        ax.set_ylabel(r"Classifier temperature $\tau$", fontsize=8)
+        ax.set_title(title, fontsize=10)
+        cb = fig.colorbar(im, ax=ax)
+        cb.set_label(cbar, fontsize=8); cb.ax.tick_params(labelsize=7)
     plt.tight_layout()
     plt.savefig(flags.out, bbox_inches="tight")
     plt.savefig(flags.out.replace(".pdf", ".png"), dpi=200, bbox_inches="tight")

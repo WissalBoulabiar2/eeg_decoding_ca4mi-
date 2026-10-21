@@ -76,6 +76,9 @@ class PrototypeMemory:
         self.count = None    # [N]
         self.labels = None   # [N]
         self.subjects = None  # [N]
+        self.comp = None      # [N, MAX_SUBJECTS] number of trials of each subject summarised by each mode
+
+    MAX_SUBJECTS = 64
 
     def __len__(self):
         return 0 if self.mu is None else self.mu.size(0)
@@ -98,10 +101,13 @@ class PrototypeMemory:
                 lbls.append(c)
 
         device = features.device
+        comp = torch.zeros(len(lbls), self.MAX_SUBJECTS, device=device)
+        comp[:, sub_id] = torch.tensor(counts, device=device)
         new = dict(mu=torch.stack(mus), var=torch.stack(vars_),
                    count=torch.tensor(counts, device=device),
                    labels=torch.tensor(lbls, device=device, dtype=torch.long),
-                   subjects=torch.full((len(lbls),), sub_id, device=device, dtype=torch.long))
+                   subjects=torch.full((len(lbls),), sub_id, device=device, dtype=torch.long),
+                   comp=comp)
         for key, val in new.items():
             old = getattr(self, key)
             setattr(self, key, val if old is None else torch.cat([old, val]))
@@ -123,31 +129,31 @@ class PrototypeMemory:
         else:
             self._set(*self._reduce(torch.ones_like(self.labels, dtype=torch.bool), self.max_prototypes))
 
-    def _set(self, mu, var, count, labels, subjects):
-        self.mu, self.var, self.count, self.labels, self.subjects = mu, var, count, labels, subjects
+    def _set(self, mu, var, count, labels, subjects, comp):
+        self.mu, self.var, self.count, self.labels, self.subjects, self.comp = mu, var, count, labels, subjects, comp
 
     def _reduce(self, mask, budget):
         """Reduce the entries selected by mask to at most budget entries."""
         if not mask.any():
             return None
         mu, var, count = self.mu[mask], self.var[mask], self.count[mask]
-        labels, subjects = self.labels[mask], self.subjects[mask]
+        labels, subjects, comp = self.labels[mask], self.subjects[mask], self.comp[mask]
         if mu.size(0) <= budget:
-            return mu, var, count, labels, subjects
+            return mu, var, count, labels, subjects, comp
 
         if self.selection == 'random':
             # Equivalent to the original reservoir: uniform random subset, the rest is discarded
             g = torch.Generator().manual_seed(self.seed + len(self) * self.n_classes + int(labels[0]))
             keep = torch.randperm(mu.size(0), generator=g)[:budget].to(mu.device)
-            return mu[keep], var[keep], count[keep], labels[keep], subjects[keep]
+            return mu[keep], var[keep], count[keep], labels[keep], subjects[keep], comp[keep]
 
         if self.selection == 'diversity':
-            return self._ward_merge(mu, var, count, labels, subjects, budget)
+            return self._ward_merge(mu, var, count, labels, subjects, comp, budget)
 
         raise ValueError(f"Unknown memory_selection: {self.selection}")
 
     @staticmethod
-    def _ward_merge(mu, var, count, labels, subjects, budget):
+    def _ward_merge(mu, var, count, labels, subjects, comp, budget):
         """
         Diversity-aware reduction: repeatedly merge the pair of same-class modes with the
         lowest Ward cost  n_i n_j / (n_i + n_j) * ||mu_i - mu_j||^2.
@@ -155,7 +161,7 @@ class PrototypeMemory:
         isolated modes survive (diversity). Nothing is discarded at random.
         """
         mu, var, count = mu.clone(), var.clone(), count.clone().float()
-        labels, subjects = labels.clone(), subjects.clone()
+        labels, subjects, comp = labels.clone(), subjects.clone(), comp.clone()
         while mu.size(0) > budget:
             d2 = torch.cdist(mu, mu).pow(2)
             n = count.unsqueeze(0) * count.unsqueeze(1) / (count.unsqueeze(0) + count.unsqueeze(1))
@@ -171,9 +177,11 @@ class PrototypeMemory:
             if count[j] > count[i]:
                 subjects[i] = subjects[j]  # merged mode is attributed to its dominant subject
             mu[i], var[i], count[i] = m, v, c
+            comp[i] = comp[i] + comp[j]  # the merged mode summarises the trials of both modes' subjects
             keep = torch.arange(mu.size(0), device=mu.device) != j
-            mu, var, count, labels, subjects = mu[keep], var[keep], count[keep], labels[keep], subjects[keep]
-        return mu, var, count, labels, subjects
+            mu, var, count, labels, subjects, comp = (mu[keep], var[keep], count[keep], labels[keep], subjects[keep],
+                                                      comp[keep])
+        return mu, var, count, labels, subjects, comp
 
     # -------------------------------------------------------------- anchors
     def anchors(self, n_modes=1):
