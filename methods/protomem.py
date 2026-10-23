@@ -72,7 +72,10 @@ class ProtoMem:
     def _sample_memory(self, n):
         m = self.memory
         idx = torch.randint(len(m), (n,), device=m.mu.device)
-        z = m.mu[idx] + m.var[idx].clamp_min(0).sqrt() * torch.randn_like(m.mu[idx])
+        if enabled(self.args, 'gen_noise', 'yes'):
+            z = m.mu[idx] + m.var[idx].clamp_min(0).sqrt() * torch.randn_like(m.mu[idx])
+        else:                                   # gen_noise='no': mean-only replay (control for the Gaussian noise)
+            z = m.mu[idx]
         return F.normalize(z, dim=1), m.labels[idx]
 
     def _epoch_batches(self, n_own, n_rep):
@@ -175,8 +178,14 @@ class ProtoMem:
             keep.append(idx[torch.randperm(len(idx), generator=g)[:per_class]])
         keep = torch.cat(keep).to(self.device)
         r = self.replay
-        x = torch.cat([x_tr[keep], r['x']]); y = torch.cat([y_tr[keep], r['y']])
-        sub = torch.cat([torch.full_like(y_tr[keep], t), r['sub']])
+        if enabled(a, 'consolidate_current', 'yes'):
+            x = torch.cat([x_tr[keep], r['x']]); y = torch.cat([y_tr[keep], r['y']])
+            sub = torch.cat([torch.full_like(y_tr[keep], t), r['sub']])
+        else:   # control: the same number of extra updates on past exemplars only, without the new subject's
+                # trials (the slots of the current subject are filled with randomly re-drawn past exemplars)
+            extra = torch.randint(len(r['y']), (len(keep),), generator=g).to(self.device)
+            x = torch.cat([r['x'], r['x'][extra]]); y = torch.cat([r['y'], r['y'][extra]])
+            sub = torch.cat([r['sub'], r['sub'][extra]])
         opt = self._optimizer(float(a.lr) * float(a.get('consolidate_lr_factor', 0.1)))
         for _ in range(n_epochs):
             self.net.train()
@@ -201,6 +210,7 @@ class ProtoMem:
             r = self.replay
             feat_new = self._embed_eval(r['x'], r['sub'])
             m = self.memory
+            mu_old = m.mu.clone()
             if a.get('drift_weighting', 'dominant') == 'weighted':
                 # a merged mode is shifted by the drifts of all the subjects it summarises, weighted by their
                 # number of trials in the mode (m.comp); subjects without exemplars do not contribute
@@ -225,6 +235,7 @@ class ProtoMem:
                         ent = (m.subjects == u) & (m.labels == c)
                         if sel.any() and ent.any():
                             m.mu[ent] = m.mu[ent] + (feat_new[sel] - r['feat'][sel]).mean(0)
+            self._drift_diagnostic(t, mu_old, feat_new)
             r['feat'] = feat_new
             if int(a.get('consolidate_epochs', 0)) > 0:
                 # after consolidation the distillation target is the improved state, not the original one
@@ -232,7 +243,8 @@ class ProtoMem:
         # 2. Gaussian modes of subject t
         sub_t = torch.full_like(y_tr, t)
         feats = self._embed_eval(x_tr, sub_t)
-        self.memory.add_subject(feats, y_tr, t, modes_per_subject=int(a.modes_per_subject))
+        ids = t * 100000 + torch.arange(len(y_tr), device=y_tr.device)       # unique id of every training trial
+        self.memory.add_subject(feats, y_tr, t, modes_per_subject=int(a.modes_per_subject), ids=ids)
         print(f"  [Memory] {self.memory.summary()}")
         # 3. exemplars of subject t (class-balanced), with their logits and embeddings
         if int(a.n_samples) > 0:
@@ -243,7 +255,7 @@ class ProtoMem:
                 keep.append(idx[torch.randperm(len(idx), generator=g)[:int(a.n_samples) // a.n_classes]])
             keep = torch.cat(keep).to(self.device)
             new = {'x': x_tr[keep], 'y': y_tr[keep], 'sub': sub_t[keep],
-                   'logits': self.net.logits(feats[keep]), 'feat': feats[keep]}
+                   'logits': self.net.logits(feats[keep]), 'feat': feats[keep], 'id': ids[keep]}
             self.replay = new if self.replay is None else {k: torch.cat([self.replay[k], new[k]]) for k in new}
             # total_buffer > 0: fixed total number of stored trials over the whole stream, shared equally by the
             # subjects seen so far and their classes; older subjects keep a random subset (their stored order is random)
@@ -256,6 +268,33 @@ class ProtoMem:
                 keep = keep.sort().values
                 self.replay = {k: v[keep] for k, v in r.items()}
             print(f"  [Replay] {len(self.replay['y'])} exemplars")
+
+    # ------------------------------------------------------------------ diagnostics
+    @torch.no_grad()
+    def _drift_diagnostic(self, t, mu_old, feat_new):
+        """Accuracy of the drift approximation: each corrected mode is compared with the mode recomputed from the
+        current embeddings of its own stored trials (exact when all of its trials are stored). Appended to self.diag
+        (saved as drift_diag.json by main_protomem.py)."""
+        m, r = self.memory, self.replay
+        if m.members is None or 'id' not in r:
+            return
+        e_corr, e_raw, cover, var_ratio, merged = [], [], [], [], 0
+        for i, mem in enumerate(m.members):
+            mask = torch.isin(r['id'], mem)
+            if int(mask.sum()) < 2:
+                continue
+            rec = feat_new[mask]
+            e_corr.append(float((m.mu[i] - rec.mean(0)).norm()))
+            e_raw.append(float((mu_old[i] - rec.mean(0)).norm()))
+            cover.append(float(mask.sum()) / len(mem))
+            var_ratio.append(float(rec.var(0, unbiased=False).mean() / m.var[i].mean().clamp_min(1e-12)))
+            merged += int((m.comp[i] > 0).sum() > 1)
+        if not hasattr(self, 'diag'):
+            self.diag = []
+        if e_corr:
+            self.diag.append({'stage': t + 1, 'modes': len(e_corr), 'merged_modes': merged,
+                              'err_corrected': float(np.mean(e_corr)), 'err_uncorrected': float(np.mean(e_raw)),
+                              'coverage': float(np.mean(cover)), 'var_ratio': float(np.mean(var_ratio))})
 
     # ------------------------------------------------------------------ evaluation
     def evaluate(self, x, y, u):

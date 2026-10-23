@@ -78,6 +78,10 @@ def run(args, seed):
     np.savetxt(os.path.join(out, 'accuracy_matrix.txt'), acc, '%.6f')
     np.savetxt(os.path.join(out, 'f1_macro_matrix.txt'), f1, '%.6f')
     np.savetxt(os.path.join(out, 'val_accuracy_matrix.txt'), val, '%.6f')
+    if getattr(method, 'diag', None):       # drift-approximation diagnostic (methods/protomem.py)
+        import json
+        with open(os.path.join(out, 'drift_diag.json'), 'w') as fh:
+            json.dump(method.diag, fh, indent=1)
     bwt = np.sum(acc[-1] - np.diag(acc)) / (n - 1)
     val_bwt = np.sum(val[-1] - np.diag(val)) / (n - 1)
     print(f"seed {seed}: ACC={acc[-1].mean():.2f}  BWT={bwt:.2f}  F1={f1[-1].mean():.2f}  "

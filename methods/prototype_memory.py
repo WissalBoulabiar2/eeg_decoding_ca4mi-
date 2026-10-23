@@ -77,6 +77,7 @@ class PrototypeMemory:
         self.labels = None   # [N]
         self.subjects = None  # [N]
         self.comp = None      # [N, MAX_SUBJECTS] number of trials of each subject summarised by each mode
+        self.members = None   # list of N LongTensors: ids of the training trials summarised by each mode (diagnostics)
 
     MAX_SUBJECTS = 64
 
@@ -84,11 +85,13 @@ class PrototypeMemory:
         return 0 if self.mu is None else self.mu.size(0)
 
     # ------------------------------------------------------------------ add
-    def add_subject(self, features, labels, sub_id, modes_per_subject=1):
-        """Summarise one subject's shared features into modes_per_subject modes per class."""
-        mus, vars_, counts, lbls = [], [], [], []
+    def add_subject(self, features, labels, sub_id, modes_per_subject=1, ids=None):
+        """Summarise one subject's shared features into modes_per_subject modes per class.
+        ids (optional): one id per trial, kept per mode so that a mode can later be recomputed from its own trials."""
+        mus, vars_, counts, lbls, members = [], [], [], [], []
+        ids = ids if ids is not None else torch.full((len(labels),), -1, dtype=torch.long, device=features.device)
         for c in range(self.n_classes):
-            fc = features[labels == c]
+            fc, ic = features[labels == c], ids[labels == c]
             if fc.size(0) == 0:
                 continue
             k = min(modes_per_subject, max(1, fc.size(0) // 2))
@@ -99,6 +102,7 @@ class PrototypeMemory:
                 vars_.append(fj.var(0, unbiased=False) if fj.size(0) > 1 else torch.zeros_like(fj[0]))
                 counts.append(float(fj.size(0)))
                 lbls.append(c)
+                members.append(ic[assign == j])
 
         device = features.device
         comp = torch.zeros(len(lbls), self.MAX_SUBJECTS, device=device)
@@ -111,6 +115,7 @@ class PrototypeMemory:
         for key, val in new.items():
             old = getattr(self, key)
             setattr(self, key, val if old is None else torch.cat([old, val]))
+        self.members = (self.members or []) + members
         self._consolidate()
 
     # ---------------------------------------------------------- consolidate
@@ -125,12 +130,13 @@ class PrototypeMemory:
             budgets = self._class_budgets()
             parts = [self._reduce(self.labels == c, budgets[c]) for c in range(self.n_classes)]
             parts = [p for p in parts if p is not None]
-            self._set(*[torch.cat(t) for t in zip(*parts)])
+            self._set(*[torch.cat(t) for t in list(zip(*parts))[:6]], sum((p[6] for p in parts), []))
         else:
             self._set(*self._reduce(torch.ones_like(self.labels, dtype=torch.bool), self.max_prototypes))
 
-    def _set(self, mu, var, count, labels, subjects, comp):
+    def _set(self, mu, var, count, labels, subjects, comp, members):
         self.mu, self.var, self.count, self.labels, self.subjects, self.comp = mu, var, count, labels, subjects, comp
+        self.members = members
 
     def _reduce(self, mask, budget):
         """Reduce the entries selected by mask to at most budget entries."""
@@ -138,22 +144,24 @@ class PrototypeMemory:
             return None
         mu, var, count = self.mu[mask], self.var[mask], self.count[mask]
         labels, subjects, comp = self.labels[mask], self.subjects[mask], self.comp[mask]
+        members = [self.members[i] for i in mask.nonzero(as_tuple=True)[0].tolist()]
         if mu.size(0) <= budget:
-            return mu, var, count, labels, subjects, comp
+            return mu, var, count, labels, subjects, comp, members
 
         if self.selection == 'random':
             # Equivalent to the original reservoir: uniform random subset, the rest is discarded
             g = torch.Generator().manual_seed(self.seed + len(self) * self.n_classes + int(labels[0]))
             keep = torch.randperm(mu.size(0), generator=g)[:budget].to(mu.device)
-            return mu[keep], var[keep], count[keep], labels[keep], subjects[keep], comp[keep]
+            return (mu[keep], var[keep], count[keep], labels[keep], subjects[keep], comp[keep],
+                    [members[i] for i in keep.tolist()])
 
         if self.selection == 'diversity':
-            return self._ward_merge(mu, var, count, labels, subjects, comp, budget)
+            return self._ward_merge(mu, var, count, labels, subjects, comp, members, budget)
 
         raise ValueError(f"Unknown memory_selection: {self.selection}")
 
     @staticmethod
-    def _ward_merge(mu, var, count, labels, subjects, comp, budget):
+    def _ward_merge(mu, var, count, labels, subjects, comp, members, budget):
         """
         Diversity-aware reduction: repeatedly merge the pair of same-class modes with the
         lowest Ward cost  n_i n_j / (n_i + n_j) * ||mu_i - mu_j||^2.
@@ -161,7 +169,7 @@ class PrototypeMemory:
         isolated modes survive (diversity). Nothing is discarded at random.
         """
         mu, var, count = mu.clone(), var.clone(), count.clone().float()
-        labels, subjects, comp = labels.clone(), subjects.clone(), comp.clone()
+        labels, subjects, comp, members = labels.clone(), subjects.clone(), comp.clone(), list(members)
         while mu.size(0) > budget:
             d2 = torch.cdist(mu, mu).pow(2)
             n = count.unsqueeze(0) * count.unsqueeze(1) / (count.unsqueeze(0) + count.unsqueeze(1))
@@ -178,10 +186,12 @@ class PrototypeMemory:
                 subjects[i] = subjects[j]  # merged mode is attributed to its dominant subject
             mu[i], var[i], count[i] = m, v, c
             comp[i] = comp[i] + comp[j]  # the merged mode summarises the trials of both modes' subjects
+            members[i] = torch.cat([members[i], members[j]])
+            del members[j]
             keep = torch.arange(mu.size(0), device=mu.device) != j
             mu, var, count, labels, subjects, comp = (mu[keep], var[keep], count[keep], labels[keep], subjects[keep],
                                                       comp[keep])
-        return mu, var, count, labels, subjects, comp
+        return mu, var, count, labels, subjects, comp, members
 
     # -------------------------------------------------------------- anchors
     def anchors(self, n_modes=1):
