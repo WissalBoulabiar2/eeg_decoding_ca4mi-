@@ -166,6 +166,8 @@ class ProtoMem:
         if n_epochs <= 0 or self.replay is None:
             return
         per_class = int(a.n_samples) // a.n_classes
+        if int(a.get('total_buffer', 0)) > 0:      # same per-subject share as the past subjects' exemplars
+            per_class = min(per_class, max(1, int(a.total_buffer) // ((t + 1) * a.n_classes)))
         g = torch.Generator().manual_seed(int(a.seed) * 1000 + 500 + t)
         keep = []
         for c in range(a.n_classes):
@@ -243,6 +245,16 @@ class ProtoMem:
             new = {'x': x_tr[keep], 'y': y_tr[keep], 'sub': sub_t[keep],
                    'logits': self.net.logits(feats[keep]), 'feat': feats[keep]}
             self.replay = new if self.replay is None else {k: torch.cat([self.replay[k], new[k]]) for k in new}
+            # total_buffer > 0: fixed total number of stored trials over the whole stream, shared equally by the
+            # subjects seen so far and their classes; older subjects keep a random subset (their stored order is random)
+            total = int(a.get('total_buffer', 0))
+            if total > 0:
+                r = self.replay
+                cap = max(1, total // (len(r['sub'].unique()) * a.n_classes))
+                keep = torch.cat([((r['sub'] == u) & (r['y'] == c)).nonzero(as_tuple=True)[0][:cap]
+                                  for u in r['sub'].unique().tolist() for c in range(a.n_classes)])
+                keep = keep.sort().values
+                self.replay = {k: v[keep] for k, v in r.items()}
             print(f"  [Replay] {len(self.replay['y'])} exemplars")
 
     # ------------------------------------------------------------------ evaluation

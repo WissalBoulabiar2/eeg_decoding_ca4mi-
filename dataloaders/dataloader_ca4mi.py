@@ -54,11 +54,16 @@ class EEGData_ca4mi:
         raw_data = np.transpose(trainX, (2, 1, 0))
         raw_data = raw_data[:, :, :1000]
         raw_targets = list(trainY)
+        # optional session of each trial (0 = training session, 1 = evaluation session) for cross-session splits
+        raw_session = (np.array(data_dict['trainS']).squeeze() if 'trainS' in data_dict
+                       else np.zeros(len(raw_targets), dtype=int))
 
         if args.n_classes == 2:
             self.data, self.targets = self._filter_classes(raw_data, raw_targets, [0, 1])
+            self.session = raw_session[np.isin(raw_targets, [0, 1])]
         elif args.n_classes == 4:
             self.data, self.targets = raw_data, raw_targets
+            self.session = raw_session
         else:
             raise ValueError("Unsupported class type for BCICompIV2a. Only 2 and 4 classes are supported.")
 
@@ -251,6 +256,15 @@ class IncrementalDataStreaming(object):
 
         labels = np.array(labels)
         indices = np.arange(len(dataset))
+
+        session = getattr(dataset, 'session', None)
+        if self.args.get('cross_session', 'no') == 'yes' and session is not None and len(session) == len(dataset):
+            # cross-session: test = all trials of the evaluation session; train / valid from the training session
+            test_indices = indices[session == 1]
+            own = indices[session == 0]
+            train_indices, valid_indices = train_test_split(own, test_size=pc_valid, stratify=labels[own],
+                                                            random_state=random_state)
+            return train_indices, valid_indices, test_indices
 
         test_size = pc_test
         valid_size = pc_valid / (1 - pc_test)

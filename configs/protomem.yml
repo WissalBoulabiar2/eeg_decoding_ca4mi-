@@ -40,6 +40,8 @@ memory_selection: 'diversity'
 class_balanced_memory: 'yes'
 #### Forgetting control
 n_samples: 20                 # exemplars per subject (class-balanced), same budget as CA4MI-MP
+total_buffer: 0               # > 0: fixed total number of stored exemplars over the whole stream (subject- and
+                              # class-balanced); 0: n_samples per subject, growing with the number of subjects
 distill_reg: 0.5              # logit consistency on exemplars (DER)
 gen_reg: 0.5                  # pseudo-feature replay from the memory modes
 drift_comp: 'yes'             # shift the modes by the drift measured on exemplars (SDC)
