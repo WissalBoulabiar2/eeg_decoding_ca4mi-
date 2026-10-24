@@ -324,9 +324,16 @@ class ProtoMem:
             real = float(sil(z))
             mu, sd = z.mean(0), z.std(0)
             null = [float(sil(mu + sd * rng.standard_normal(z.shape))) for _ in range(n_null)]
+            # stricter null: a single Gaussian with the full empirical covariance (correlations kept), sampled as
+            # mu + sum_i (z_i - mu) g_i / sqrt(n), g ~ N(0, I)
+            zc = z - mu
+            full = [float(sil(mu + rng.standard_normal((len(z), len(z))) @ zc / np.sqrt(len(z))))
+                    for _ in range(n_null)]
             self.mode_diag.append({'subject': t + 1, 'class': c, 'n': len(z), 'silhouette': real,
                                    'null_mean': float(np.mean(null)), 'null_sd': float(np.std(null)),
-                                   'p': float(np.mean(np.array(null) >= real))})
+                                   'p': float(np.mean(np.array(null) >= real)),
+                                   'null_full_mean': float(np.mean(full)), 'null_full_sd': float(np.std(full)),
+                                   'p_full': float(np.mean(np.array(full) >= real))})
 
     # ------------------------------------------------------------------ evaluation
     def evaluate(self, x, y, u):
