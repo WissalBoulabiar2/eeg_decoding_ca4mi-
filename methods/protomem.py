@@ -178,7 +178,14 @@ class ProtoMem:
             keep.append(idx[torch.randperm(len(idx), generator=g)[:per_class]])
         keep = torch.cat(keep).to(self.device)
         r = self.replay
-        if enabled(a, 'consolidate_current', 'yes'):
+        if not enabled(a, 'consolidate_balanced', 'yes'):
+            # update-matched control: the same number of trials and updates, drawn without balancing from the ordinary
+            # training mixture (all training trials of subject t + the exemplars), so only the balancing differs
+            px = torch.cat([x_tr, r['x']]); py = torch.cat([y_tr, r['y']])
+            ps = torch.cat([torch.full_like(y_tr, t), r['sub']])
+            pick = torch.randperm(len(py), generator=g)[:len(keep) + len(r['y'])].to(self.device)
+            x, y, sub = px[pick], py[pick], ps[pick]
+        elif enabled(a, 'consolidate_current', 'yes'):
             x = torch.cat([x_tr[keep], r['x']]); y = torch.cat([y_tr[keep], r['y']])
             sub = torch.cat([torch.full_like(y_tr[keep], t), r['sub']])
         else:   # control: the same number of extra updates on past exemplars only, without the new subject's
@@ -243,6 +250,8 @@ class ProtoMem:
         # 2. Gaussian modes of subject t
         sub_t = torch.full_like(y_tr, t)
         feats = self._embed_eval(x_tr, sub_t)
+        if enabled(a, 'mode_diag', 'yes'):
+            self._multimodality_diagnostic(t, feats, y_tr)
         ids = t * 100000 + torch.arange(len(y_tr), device=y_tr.device)       # unique id of every training trial
         self.memory.add_subject(feats, y_tr, t, modes_per_subject=int(a.modes_per_subject), ids=ids)
         print(f"  [Memory] {self.memory.summary()}")
@@ -295,6 +304,29 @@ class ProtoMem:
             self.diag.append({'stage': t + 1, 'modes': len(e_corr), 'merged_modes': merged,
                               'err_corrected': float(np.mean(e_corr)), 'err_uncorrected': float(np.mean(e_raw)),
                               'coverage': float(np.mean(cover)), 'var_ratio': float(np.mean(var_ratio))})
+
+    @torch.no_grad()
+    def _multimodality_diagnostic(self, t, feats, y, n_null=20):
+        """Are the embeddings of one (subject, class) multimodal? Silhouette of a 2-means clustering of the real
+        embeddings, against the same statistic on samples of a single diagonal Gaussian with the same mean and
+        variance (parametric null). p = share of null draws with a silhouette >= the real one. CPU / numpy with its
+        own generator, so the training RNG streams are unchanged. Appended to self.mode_diag (mode_diag.json)."""
+        from sklearn.cluster import KMeans
+        from sklearn.metrics import silhouette_score
+        rng = np.random.default_rng(int(self.args.seed) * 1000 + 700 + t)
+        sil = lambda z: silhouette_score(z, KMeans(2, n_init=10, random_state=0).fit_predict(z))
+        if not hasattr(self, 'mode_diag'):
+            self.mode_diag = []
+        for c in range(int(self.args.n_classes)):
+            z = feats[y == c].double().cpu().numpy()
+            if len(z) < 6:
+                continue
+            real = float(sil(z))
+            mu, sd = z.mean(0), z.std(0)
+            null = [float(sil(mu + sd * rng.standard_normal(z.shape))) for _ in range(n_null)]
+            self.mode_diag.append({'subject': t + 1, 'class': c, 'n': len(z), 'silhouette': real,
+                                   'null_mean': float(np.mean(null)), 'null_sd': float(np.std(null)),
+                                   'p': float(np.mean(np.array(null) >= real))})
 
     # ------------------------------------------------------------------ evaluation
     def evaluate(self, x, y, u):

@@ -82,6 +82,10 @@ def run(args, seed):
         import json
         with open(os.path.join(out, 'drift_diag.json'), 'w') as fh:
             json.dump(method.diag, fh, indent=1)
+    if getattr(method, 'mode_diag', None):  # multimodality of the (subject, class) embeddings
+        import json
+        with open(os.path.join(out, 'mode_diag.json'), 'w') as fh:
+            json.dump(method.mode_diag, fh, indent=1)
     bwt = np.sum(acc[-1] - np.diag(acc)) / (n - 1)
     val_bwt = np.sum(val[-1] - np.diag(val)) / (n - 1)
     print(f"seed {seed}: ACC={acc[-1].mean():.2f}  BWT={bwt:.2f}  F1={f1[-1].mean():.2f}  "

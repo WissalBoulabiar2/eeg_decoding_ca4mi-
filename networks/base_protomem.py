@@ -47,10 +47,14 @@ class ProtoMemNet(nn.Module):
         self.sbns = [m for m in self.encoder.modules() if isinstance(m, SubjectBatchNorm)]
         self.proxies = nn.Parameter(0.1 * torch.randn(args.n_classes, args.n_proxies, args.latent_dim))
         self.tau = float(args.tau)
+        # subject_bn='no': control with one BN shared by all subjects (always trained, replayed trials included)
+        self.shared_bn = args.get('subject_bn', 'yes') not in ('yes', True)
 
     def start_subject(self, t, freeze_past=True):
         """Warm-start the BN of subject t from subject t-1. Past subjects always keep their running statistics;
         with freeze_past their affine parameters are frozen too, otherwise replay can still adapt them."""
+        if self.shared_bn:
+            return
         for m in self.sbns:
             if t > 0:
                 m.bns[t].load_state_dict(m.bns[t - 1].state_dict())
@@ -62,6 +66,8 @@ class ProtoMemNet(nn.Module):
     def embed(self, x, sub):
         """x: [N, C, T] trials, sub: [N] subject ids. Each subject group goes through its own BN."""
         x = x[:, None].float()
+        if self.shared_bn:
+            sub = torch.zeros_like(sub)
         parts, order = [], []
         for u in sub.unique().tolist():
             idx = (sub == u).nonzero(as_tuple=True)[0]

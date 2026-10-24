@@ -50,6 +50,9 @@ drift_weighting: 'dominant'   # merged modes: 'dominant' = drift of the dominant
 freeze_past_bn: 'yes'         # 'no': past subjects' BN affine parameters stay trainable through replay
 consolidate_epochs: 0         # > 0: balanced fine-tuning on all subjects' exemplars after each subject
 consolidate_lr_factor: 0.1    # its learning rate = lr * factor
+consolidate_balanced: 'yes'   # 'no': update-matched control, same number of trials drawn without balancing
+subject_bn: 'yes'             # 'no': one BatchNorm shared by all subjects (control)
+mode_diag: 'yes'              # multimodality diagnostic of the (subject, class) embeddings (mode_diag.json)
 ema_decay: 0.0                # > 0: keep / validate the exponential moving average of the weights (Polyak)
 balanced_replay: 'no'         # 'yes': each batch = batch_size current-subject trials + batch_size exemplars
 #### Data augmentation (training batches only)
