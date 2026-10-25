@@ -157,6 +157,20 @@ for o in ('rev', 'p1', 'p2'):
     row(f"chosen {o}", c); row(f"A0 {o}", a)
     paired(f"chosen - A0 ({o})", c, a)
 
+if len(sys.argv) > 4:      # review 9: Euclidean-alignment control of the chosen configuration, seeds 18-37
+    R9 = os.path.join(sys.argv[4], 'results9')
+    noea = {}
+    for f in glob.glob(f"{R9}/chosen_noEA/protomem_9_subjects_seed_*/accuracy_matrix.txt"):
+        noea[int(os.path.basename(os.path.dirname(f)).rsplit('_', 1)[1])] = load(f)
+    ch20 = {**sub(CH, NEW), **runs(R8, 'H_confirm', 'chosen')}
+    print("\n=== F. Euclidean-alignment control, pooled seeds 18-37 ===")
+    row(f"chosen ({chosen})", ch20); row("chosen without EA", noea)
+    paired("chosen - chosen without EA", ch20, noea)
+    subject_level("chosen - chosen without EA", ch20, noea)
+    for m in ['er', 'mudvi', 'cger', 'ca4mi']:
+        bl = {**runs(R7, 'C_confirm', m), **runs(R8, 'H_confirm', m)}
+        paired(f"chosen without EA - {m}", noea, bl)
+
 print("\n=== E. multimodality of the (subject, class) embeddings, full-covariance null ===")
 for n in [chosen, 'sel']:
     recs = [x for g in glob.glob(f"{R8}/P1_shared/protomem/{n}/*/mode_diag.json") for x in json.load(open(g))]
