@@ -10,7 +10,11 @@ For every method:
     trials, added to the training split only (the original loader labels every replayed trial 0 and splits the
     memory into the validation and test sets of the current subject).
 Each method keeps its own memory size (n_samples) and other settings from its config.
+Optional ea='yes' (default 'no'): per-subject Euclidean alignment, as in ProtoMem (main/main_protomem.py), with the
+reference covariance of the current subject's TRAINING trials applied to its training, validation and test trials;
+the replay memory is drawn from the aligned training split. Not applied to CA4MI, which has its own alignment.
 """
+import numpy as np
 import torch
 from torch.utils.data import Dataset, Subset, ConcatDataset, DataLoader
 from dataloaders import dataloader_replay as replay
@@ -45,12 +49,25 @@ class _TwoTuple(Dataset):
         return len(self.dataset)
 
 
+def _ea_matrix(x):
+    """R^{-1/2} with R the mean trial covariance (Euclidean alignment, He & Wu 2019); same as main_protomem."""
+    xc = x - x.mean(-1, keepdims=True)
+    r = np.einsum('nct,ndt->cd', xc, xc) / (x.shape[0] * (x.shape[-1] - 1))
+    w, v = np.linalg.eigh(r)
+    return (v / np.sqrt(np.clip(w, 1e-10, None))) @ v.T
+
+
 def _own_subject(streaming, sub_id):
     """Current subject's own trials (no memory, no shuffling) and the shared split."""
     own = replay.EEGData(root=streaming.root, args=streaming.args, sub=streaming.subject_queue[sub_id],
                          memory=None, sub_id=sub_id)
     split = replay.IncrementalDataStreaming.stratified_split(
         streaming, own, streaming.pc_valid, streaming.pc_test, random_state=streaming.seed + sub_id)
+    args = streaming.args
+    if args.get('ea', 'no') in ('yes', True) and args.experiment != 'ca4mi':
+        data = np.asarray(own.data)
+        w = _ea_matrix(data[np.asarray(split[0])].astype(np.float64))      # reference: training trials only
+        own.data = np.einsum('cd,ndt->nct', w, data).astype(data.dtype)
     return own, split
 
 
