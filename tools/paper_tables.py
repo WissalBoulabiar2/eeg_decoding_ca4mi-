@@ -142,6 +142,26 @@ print(f"  without EA: ACC {cell(noea, 'ACC')}, BWT {cell(noea, 'BWT')}, F+ {cell
 for m in ['er', 'mudvi', 'cger', 'ca4mi']:
     print(f"  without EA - {m}: ACC {dtxt(noea, main[m], 'ACC')} | BWT {dtxt(noea, main[m], 'BWT')}")
 
+if len(sys.argv) > 5:      # review 10: alignment-matched baselines (ea=yes), seeds 18-37
+    R10 = os.path.join(sys.argv[5], 'results10')
+    from scipy import stats
+    ea = {m: T.runs(R10, '.', m, bench='bench_ea') for m in ['er', 'cger', 'mudvi']}
+    print("\n% ===== Table alignment-matched baselines (seeds 18-37)")
+    for m in ['er', 'cger', 'mudvi']:
+        print(f"{NAMES[m]} + EA & " + " & ".join(cell(ea[m], k) for k in ['ACC', 'BWT', 'F+', 'F1', 'LA'])
+              + f" \\\\ % n={len(ea[m])}")
+    adj = holm({m: diff(main['chosen'], ea[m], 'ACC')[0][3] for m in ea})
+    for m in ['er', 'cger', 'mudvi']:
+        print(f"% {m}+EA - {m}: ACC {dtxt(ea[m], main[m], 'ACC')} | BWT {dtxt(ea[m], main[m], 'BWT')}")
+        print(f"ProtoMem $-$ {NAMES[m]} + EA & " + " & ".join(dtxt(main['chosen'], ea[m], k)
+                                                         for k in ['ACC', 'BWT', 'F+']) + f" & {adj[m]:.3f} \\\\")
+        s = sorted(set(main['chosen']) & set(ea[m]))
+        g = np.mean([main['chosen'][i][1] - ea[m][i][1] for i in s], axis=0)
+        print(f"%   subject level: improved {(g > 0).sum()}/9, Wilcoxon p={stats.wilcoxon(g).pvalue:.3f}, "
+              + " ".join(f"{x:+.1f}" for x in g))
+        for lab, seeds in [("28-37", T.FRESH)]:
+            print(f"%   seeds {lab}: ProtoMem - {m}+EA ACC {dtxt(T.sub(main['chosen'], seeds), T.sub(ea[m], seeds), 'ACC')}")
+
 print("\n% ===== Table protocols (seeds 8-12): ACC mean +- SD (BWT), and ProtoMem - method ACC")
 for title, blk, nsub, bases in [("Cross-session", 'D_xsess', 9, ['er', 'mudvi', 'cger', 'ca4mi']),
                                 ("Four-class", 'F_4class', 9, ['cger', 'ca4mi']),
