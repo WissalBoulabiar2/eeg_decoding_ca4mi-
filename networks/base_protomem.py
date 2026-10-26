@@ -49,6 +49,11 @@ class ProtoMemNet(nn.Module):
         self.tau = float(args.tau)
         # subject_bn='no': control with one BN shared by all subjects (always trained, replayed trials included)
         self.shared_bn = args.get('subject_bn', 'yes') not in ('yes', True)
+        # classifier='linear': control with a standard linear softmax head on the unnormalized embedding,
+        # instead of the L2-normalized embedding and cosine proxies
+        self.linear = args.get('classifier', 'proxy') == 'linear'
+        if self.linear:
+            self.fc = nn.Linear(args.latent_dim, args.n_classes)
 
     def start_subject(self, t, freeze_past=True):
         """Warm-start the BN of subject t from subject t-1. Past subjects always keep their running statistics;
@@ -77,9 +82,11 @@ class ProtoMemNet(nn.Module):
             order.append(idx)
         z, order = torch.cat(parts), torch.cat(order)
         out = z.new_zeros(len(x), z.size(1)).index_add(0, order, z)
-        return F.normalize(out, dim=1)
+        return out if self.linear else F.normalize(out, dim=1)
 
     def logits(self, z):
+        if self.linear:
+            return self.fc(z)
         p = F.normalize(self.proxies, dim=-1)                       # [C, K, D]
         d2 = ((z[:, None, None, :] - p[None]) ** 2).sum(-1)         # [N, C, K]
         return torch.logsumexp(-d2 / self.tau, dim=2)               # [N, C]
