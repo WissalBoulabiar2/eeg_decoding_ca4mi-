@@ -25,10 +25,18 @@ from pyriemann.estimation import Covariances
 from pyriemann.spatialfilters import CSP
 from pyriemann.tangentspace import TangentSpace
 from dataloaders.dataloader_ca4mi_mp import IncrementalDataStreamingMP
-from main.main_protomem import to_arrays
 
 FS = 250
 BANDS = [(lo, lo + 4) for lo in range(4, 40, 4)]
+
+
+def to_arrays(loader):
+    """Same as main_protomem.to_arrays (not imported: `main` is shadowed by main/main.py on the molab PYTHONPATH)."""
+    xs, ys = [], []
+    for batch in loader:
+        xs.append(np.asarray(batch[0], dtype=np.float32))
+        ys.append(np.asarray(batch[1]))
+    return np.concatenate(xs), np.concatenate(ys).astype(np.int64)
 
 
 def bandpass(x, lo, hi):
