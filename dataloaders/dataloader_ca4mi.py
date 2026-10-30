@@ -258,7 +258,8 @@ class IncrementalDataStreaming(object):
         indices = np.arange(len(dataset))
 
         session = getattr(dataset, 'session', None)
-        if self.args.get('cross_session', 'no') == 'yes' and session is not None and len(session) == len(dataset):
+        # `--set cross_session=yes` is parsed by OmegaConf as the boolean True: accept both spellings
+        if self.args.get('cross_session', 'no') in ('yes', True) and session is not None and len(session) == len(dataset):
             # cross-session: test = all trials of the evaluation session; train / valid from the training session
             test_indices = indices[session == 1]
             own = indices[session == 0]
