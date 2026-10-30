@@ -255,8 +255,27 @@ class ProtoMem:
         ids = t * 100000 + torch.arange(len(y_tr), device=y_tr.device)       # unique id of every training trial
         self.memory.add_subject(feats, y_tr, t, modes_per_subject=int(a.modes_per_subject), ids=ids)
         print(f"  [Memory] {self.memory.summary()}")
-        # 3. exemplars of subject t (class-balanced), with their logits and embeddings
-        if int(a.n_samples) > 0:
+        # 3. exemplars of subject t, with their logits and embeddings
+        if a.get('buffer_policy', 'balanced') == 'reservoir' and int(a.get('total_buffer', 0)) > 0:
+            # control: reservoir sampling (Vitter's algorithm R) over the stream of all training trials, capacity
+            # total_buffer; the buffer is uniform over the trials seen so far, not balanced by subject or class
+            cap, g = int(a.total_buffer), torch.Generator().manual_seed(int(a.seed) * 1000 + 900 + t)
+            new = {'x': x_tr, 'y': y_tr, 'sub': sub_t, 'logits': self.net.logits(feats), 'feat': feats, 'id': ids}
+            r = self.replay if self.replay is not None else {k: v[:0] for k, v in new.items()}
+            seen = getattr(self, 'n_seen', 0)
+            for i in torch.randperm(len(y_tr), generator=g).tolist():
+                if len(r['y']) < cap:
+                    r = {k: torch.cat([r[k], new[k][i:i + 1]]) for k in r}
+                else:
+                    j = int(torch.randint(seen + 1, (1,), generator=g))
+                    if j < cap:
+                        for k in r:
+                            r[k][j] = new[k][i]
+                seen += 1
+            self.n_seen, self.replay = seen, r
+            print(f"  [Replay] reservoir: {len(r['y'])} exemplars, per subject "
+                  f"{ {int(u): int((r['sub'] == u).sum()) for u in r['sub'].unique()} }")
+        elif int(a.n_samples) > 0:
             g = torch.Generator().manual_seed(int(a.seed) * 1000 + t)
             keep = []
             for c in range(a.n_classes):

@@ -43,7 +43,61 @@ def ea_matrix(x):
     return (v / np.sqrt(np.clip(w, 1e-10, None))) @ v.T
 
 
+def load_subject(args, loader, t):
+    """Aligned (x_tr, y_tr, x_va, y_va, x_te, y_te) tensors of the t-th subject of the stream."""
+    d = loader.load_data(t)[t]
+    x_tr, y_tr = to_arrays(d['train'])
+    x_va, y_va = to_arrays(d['valid'])
+    x_te, y_te = to_arrays(d['test'])
+    if enabled(args, 'ea', 'yes'):
+        w = ea_matrix(x_tr)
+        x_tr, x_va, x_te = (np.einsum('cd,ndt->nct', w, z).astype(np.float32) for z in (x_tr, x_va, x_te))
+    return d['name'], tuple(torch.as_tensor(a, device=args.device) for a in (x_tr, y_tr, x_va, y_va, x_te, y_te))
+
+
+def run_reference(args, seed, mode):
+    """Reference points without continual learning (same network, alignment and training schedule):
+    mode='isolated': one fresh model per subject, trained and tested on that subject only (cannot forget);
+    mode='joint': one model trained once on all subjects' training trials, selected on all validation trials.
+    The matrix row r holds the accuracy of subjects 0..r, so ACC is computed exactly as for the incremental runs
+    (BWT and forgetting are 0 by construction)."""
+    args.seed = seed
+    set_seed(seed)
+    loader = IncrementalDataStreamingMP(args)
+    n = args.n_subjects
+    data = [load_subject(args, loader, t)[1] for t in range(n)]
+    acc_u, f1_u, val_u = np.zeros(n), np.zeros(n), np.zeros(n)
+    if mode == 'isolated':
+        for t in range(n):
+            set_seed(seed * 100 + t)
+            method = ProtoMem(args)
+            x_tr, y_tr, x_va, y_va, x_te, y_te = data[t]
+            print(f"--- isolated model, subject {t + 1}/{n}")
+            method.train_subject(0, x_tr, y_tr, x_va, y_va)
+            acc_u[t], f1_u[t] = method.evaluate(x_te, y_te, 0)
+            val_u[t] = method.evaluate(x_va, y_va, 0)[0]
+    else:
+        method = ProtoMem(args)
+        cat = lambda k: torch.cat([d[k] for d in data])
+        print(f"--- joint model on {n} subjects")
+        method.train_subject(0, cat(0), cat(1), cat(2), cat(3))
+        for t in range(n):
+            acc_u[t], f1_u[t] = method.evaluate(data[t][4], data[t][5], 0)
+            val_u[t] = method.evaluate(data[t][2], data[t][3], 0)[0]
+    acc, f1, val = (np.tril(np.tile(v, (n, 1))).astype(np.float32) for v in (acc_u, f1_u, val_u))
+    out = os.path.join(args.checkpoint, f"{args.experiment}_{n}_subjects_seed_{seed}")
+    os.makedirs(out, exist_ok=True)
+    np.savetxt(os.path.join(out, 'accuracy_matrix.txt'), acc, '%.6f')
+    np.savetxt(os.path.join(out, 'f1_macro_matrix.txt'), f1, '%.6f')
+    np.savetxt(os.path.join(out, 'val_accuracy_matrix.txt'), val, '%.6f')
+    print(f"seed {seed} [{mode}]: ACC={acc_u.mean():.2f}  -> {out}")
+    return acc_u.mean(), 0.0
+
+
 def run(args, seed):
+    mode = args.get('mode', 'incremental')
+    if mode in ('isolated', 'joint'):
+        return run_reference(args, seed, mode)
     args.seed = seed
     set_seed(seed)
     loader = IncrementalDataStreamingMP(args)
