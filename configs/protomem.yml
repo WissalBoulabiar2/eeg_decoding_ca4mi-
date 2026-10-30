@@ -54,7 +54,9 @@ consolidate_balanced: 'yes'   # 'no': update-matched control, same number of tri
 subject_bn: 'yes'             # 'no': one BatchNorm shared by all subjects (control)
 classifier: 'proxy'           # 'linear': standard linear softmax head on the unnormalized embedding (control)
 buffer_policy: 'balanced'     # 'reservoir': reservoir sampling over all training trials (control, needs total_buffer)
-mode: 'incremental'           # 'isolated': one model per subject; 'joint': one model on all subjects (references)
+mode: 'incremental'           # 'isolated': one model per subject; 'joint': one model on all subjects (references);
+                              # 'cumjoint': fresh model on subjects 1..t at every stage (noise floor of F+ / F^max)
+bn_recal: 'no'                # 'yes': re-estimate shared-BN running statistics on the consolidation set (control)
 mode_diag: 'yes'              # multimodality diagnostic of the (subject, class) embeddings (mode_diag.json)
 ema_decay: 0.0                # > 0: keep / validate the exponential moving average of the weights (Polyak)
 balanced_replay: 'no'         # 'yes': each batch = batch_size current-subject trials + batch_size exemplars

@@ -221,7 +221,7 @@ class DER:
 
             if is_improved:
                 best_loss = valid_metrics['loss']
-                best_model = self.model.state_dict().copy()
+                best_model = deepcopy(self.model.state_dict())
                 patience_counter = 0
             else:
                 patience_counter += 1

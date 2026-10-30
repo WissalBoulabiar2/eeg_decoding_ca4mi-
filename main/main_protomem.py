@@ -60,14 +60,30 @@ def run_reference(args, seed, mode):
     mode='isolated': one fresh model per subject, trained and tested on that subject only (cannot forget);
     mode='joint': one model trained once on all subjects' training trials, selected on all validation trials.
     The matrix row r holds the accuracy of subjects 0..r, so ACC is computed exactly as for the incremental runs
-    (BWT and forgetting are 0 by construction)."""
+    (BWT and forgetting are 0 by construction).
+    mode='cumjoint': at every stage t, a fresh model trained on the training trials of subjects 0..t and selected on
+    their validation trials. It forgets nothing by construction, so its F+ and F^max are the noise floor of these
+    metrics (re-training and 22-trial test noise), and its row t is the stage-wise upper bound."""
     args.seed = seed
     set_seed(seed)
     loader = IncrementalDataStreamingMP(args)
     n = args.n_subjects
     data = [load_subject(args, loader, t)[1] for t in range(n)]
     acc_u, f1_u, val_u = np.zeros(n), np.zeros(n), np.zeros(n)
-    if mode == 'isolated':
+    full = None
+    if mode == 'cumjoint':
+        full = tuple(np.zeros((n, n), dtype=np.float32) for _ in range(3))
+        for t in range(n):
+            set_seed(seed * 100 + t)
+            method = ProtoMem(args)
+            cat = lambda k: torch.cat([d[k] for d in data[:t + 1]])
+            print(f"--- cumulative joint model, subjects 1..{t + 1}")
+            method.train_subject(0, cat(0), cat(1), cat(2), cat(3))
+            for u in range(t + 1):
+                full[0][t, u], full[1][t, u] = method.evaluate(data[u][4], data[u][5], 0)
+                full[2][t, u] = method.evaluate(data[u][2], data[u][3], 0)[0]
+        acc_u = full[0][-1]
+    elif mode == 'isolated':
         for t in range(n):
             set_seed(seed * 100 + t)
             method = ProtoMem(args)
@@ -84,7 +100,8 @@ def run_reference(args, seed, mode):
         for t in range(n):
             acc_u[t], f1_u[t] = method.evaluate(data[t][4], data[t][5], 0)
             val_u[t] = method.evaluate(data[t][2], data[t][3], 0)[0]
-    acc, f1, val = (np.tril(np.tile(v, (n, 1))).astype(np.float32) for v in (acc_u, f1_u, val_u))
+    acc, f1, val = full if full is not None else \
+        (np.tril(np.tile(v, (n, 1))).astype(np.float32) for v in (acc_u, f1_u, val_u))
     out = os.path.join(args.checkpoint, f"{args.experiment}_{n}_subjects_seed_{seed}")
     os.makedirs(out, exist_ok=True)
     np.savetxt(os.path.join(out, 'accuracy_matrix.txt'), acc, '%.6f')
@@ -96,7 +113,7 @@ def run_reference(args, seed, mode):
 
 def run(args, seed):
     mode = args.get('mode', 'incremental')
-    if mode in ('isolated', 'joint'):
+    if mode in ('isolated', 'joint', 'cumjoint'):
         return run_reference(args, seed, mode)
     args.seed = seed
     set_seed(seed)
@@ -121,6 +138,7 @@ def run(args, seed):
         print(f"--- subject {t + 1}/{n} ({d['name']})")
         method.train_subject(t, x_tr, y_tr, x_va, y_va)
         method.consolidate(t, x_tr, y_tr)
+        method.recalibrate_bn(t, x_tr, y_tr)
         method.end_subject(t, x_tr, y_tr)
         for u in range(t + 1):
             acc[t, u], f1[t, u] = method.evaluate(data[u][4], data[u][5], u)

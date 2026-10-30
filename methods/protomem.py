@@ -208,6 +208,41 @@ class ProtoMem:
                 opt.step()
         print(f"  [Consolidation] {n_epochs} balanced epochs on {len(y)} trials ({len(r['y'])} exemplars)")
 
+    @torch.no_grad()
+    def recalibrate_bn(self, t, x_tr, y_tr):
+        """bn_recal='yes' (control, review 14): after subject t, re-estimate the running statistics of the shared
+        BatchNorm layers on the set balanced consolidation uses (exemplars of the past subjects + an equal-size
+        class-balanced sample of subject t), with no gradient step. Separates what consolidation does through the
+        BN statistics from what it does through its weight updates. Shared BN only."""
+        a = self.args
+        if not enabled(a, 'bn_recal', 'no') or self.replay is None or not self.net.shared_bn:
+            return
+        per_class = int(a.n_samples) // a.n_classes
+        if int(a.get('total_buffer', 0)) > 0:
+            per_class = min(per_class, max(1, int(a.total_buffer) // ((t + 1) * a.n_classes)))
+        g = torch.Generator().manual_seed(int(a.seed) * 1000 + 700 + t)
+        keep = []
+        for c in range(a.n_classes):
+            idx = (y_tr == c).nonzero(as_tuple=True)[0].cpu()
+            keep.append(idx[torch.randperm(len(idx), generator=g)[:per_class]])
+        keep = torch.cat(keep).to(self.device)
+        r = self.replay
+        x = torch.cat([x_tr[keep], r['x']])
+        sub = torch.cat([torch.full_like(y_tr[keep], t), r['sub']])
+        bns = [m for m in self.net.modules() if isinstance(m, torch.nn.modules.batchnorm._BatchNorm)]
+        momenta = [m.momentum for m in bns]
+        for m in bns:
+            m.reset_running_stats()
+            m.momentum = None                       # cumulative average over the batches
+        self.net.train()
+        perm = torch.randperm(len(x), generator=g).to(self.device)
+        for i in range(0, len(x), int(a.batch_size)):
+            idx = perm[i:i + int(a.batch_size)]
+            self.net.embed(x[idx], sub[idx])
+        for m, mom in zip(bns, momenta):
+            m.momentum = mom
+        print(f"  [BN recalibration] running statistics re-estimated on {len(x)} trials ({len(r['y'])} exemplars)")
+
     # ------------------------------------------------------------------ after a subject
     @torch.no_grad()
     def end_subject(self, t, x_tr, y_tr):

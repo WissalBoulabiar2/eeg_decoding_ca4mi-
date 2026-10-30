@@ -225,7 +225,7 @@ class ElasticWeightConsolidation:
 
                 if valid_res['loss_tot'] < best_loss:
                     best_loss = valid_res['loss_tot']
-                    best_model = self.model.state_dict().copy()
+                    best_model = deepcopy(self.model.state_dict())
                     patience = initial_patience
                     print(' *', end='')
                 else:

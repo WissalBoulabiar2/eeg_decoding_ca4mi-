@@ -8,6 +8,7 @@ from copy import deepcopy
 import os
 import torch.nn as nn
 import time
+from methods.matched_schedule import MatchedSchedule, enabled as matched_enabled
 
 
 class mudvi:
@@ -84,6 +85,7 @@ class mudvi:
         learning_rate = self.optimizer.param_groups[0]['lr']
         lr_factor = getattr(self, 'lr_factor', 0.5)
         lr_min = getattr(self, 'lr_min', 1e-6)
+        sched = MatchedSchedule(self.model, [self.optimizer]) if matched_enabled(self.args) else None
 
         for epoch in range(self.epochs):
             # === Training Phase ===
@@ -167,10 +169,15 @@ class mudvi:
                 valid_res = self._evaluate_on_validation(valid_loader, subject_idx)
 
                 print(f", Valid Loss: {valid_res['loss_tot']:.4f}, Valid Acc: {valid_res['acc_t']:.1f}%", end='')
+                if sched is not None:
+                    print()
+                    if sched.step(epoch + 1, valid_res['loss_tot']):
+                        break
+                    continue
 
                 if valid_res['loss_tot'] < best_loss:
                     best_loss = valid_res['loss_tot']
-                    best_model = self.model.state_dict().copy()
+                    best_model = deepcopy(self.model.state_dict())
                     patience = initial_patience
                     print(' *', end='')
                 else:
@@ -188,7 +195,9 @@ class mudvi:
 
             print()
 
-        if best_model is not None:
+        if sched is not None:
+            sched.restore()
+        elif best_model is not None:
             print(f"Loading best model with validation loss: {best_loss:.4f}")
             self.model.load_state_dict(best_model)
 

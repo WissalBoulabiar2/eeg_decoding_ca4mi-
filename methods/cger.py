@@ -4,6 +4,7 @@ from main import utils
 print(sys.path)
 import copy
 from copy import deepcopy
+from methods.matched_schedule import MatchedSchedule, enabled as matched_enabled
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -132,6 +133,7 @@ class CGER:
             print(f"Received {len(prototypes)} prototypes for task {task_id}")
 
         current_task_prototypes = self.get_prototype_samples(dataset['train'], task_id)
+        sched = MatchedSchedule(self.model, [self.optimizer_e]) if matched_enabled(self.args) else None
 
         for e in range(self.nepochs):
             clock0 = time.time()
@@ -146,6 +148,11 @@ class CGER:
 
             valid_res = self.eval_(dataset['valid'], task_id)
             utils.report_val_baseline(valid_res)
+            if sched is not None:
+                print()
+                if sched.step(e + 1, valid_res['loss_t']):
+                    break
+                continue
 
             if valid_res['loss_t'] < best_loss:
                 best_loss = valid_res['loss_t']
@@ -161,7 +168,10 @@ class CGER:
 
             print()
 
-        self.model.load_state_dict(copy.deepcopy(best_model))
+        if sched is not None:
+            sched.restore()
+        else:
+            self.model.load_state_dict(copy.deepcopy(best_model))
         self.save_model(task_id)
 
         return current_task_prototypes
